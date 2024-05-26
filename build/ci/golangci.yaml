@@ -1,0 +1,101 @@
+run:
+  allow-parallel-runners: true
+output:
+  print-issued-lines: false
+  show-stats: true
+  sort-results: true
+  uniq-by-line: false
+linters:
+  disable-all: true
+  enable:
+    - errcheck
+    - gosimple
+    - ineffassign
+    # staticcheck à voir
+    - unused
+    - asasalint
+    - bidichk
+    - bodyclose
+    - containedctx
+    - contextcheck
+    - copyloopvar
+    - cyclop
+    - decorder
+    - dogsled
+    - dupl
+    - dupword
+    - errchkjson
+    - errname
+    - errorlint
+    - exhaustive
+    - exhaustruct
+    - exportloopref
+    - forbidigo # doublon avec goprintffuncname
+    - forcetypeassert
+    - funlen
+    - gci # à voir, conflit avec jetbrains ? hum chelou le -ed ?
+    - gocheckcompilerdirectives
+    - gochecknoglobals
+    - gochecknoinits
+    - gochecksumtype
+    - gocognit # à voir avec cyclop
+    - goconst
+    - gocritic
+    - gocyclo
+    - godot
+    - godox
+    - err113
+    - gofmt
+    - goheader
+    - goimports # à voir il y en a un autre
+    - mnd
+    - gomoddirectives
+    - gomodguard
+    - goprintffuncname
+    - gosec
+    - gosmopolitan
+    - grouper
+    - importas
+    - inamedparam
+    - interfacebloat
+    - intrange
+    - ireturn # hum c’est pas bien ? pourquoi ?
+    - lll
+    - maintidx
+    - makezero
+    - mirror
+    - misspell
+    - musttag
+    - nakedret
+    - nestif
+    - nilerr
+    - nilnil
+    - nlreturn
+    - noctx
+    - nolintlint
+    - nonamedreturns
+    - paralleltest
+    - perfsprint
+    - prealloc
+    - predeclared
+    - promlinter
+    - protogetter
+    - reassign
+    - rowserrcheck
+    - sloglint
+    - spancheck
+    - sqlclosecheck
+    - stylecheck
+    - tagalign
+    - tagliatelle
+    - tenv
+    - testableexamples
+    - thelper
+    - tparallel
+    - unconvert
+    - unparam
+    - usestdlibvars
+    - varnamelen
+    - wastedassign
+    - whitespace
+    - wsl
