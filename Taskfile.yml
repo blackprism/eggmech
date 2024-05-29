@@ -1,6 +1,12 @@
 version: "3"
 
 tasks:
-  linter:
+  nats:
+    cmds:
+      - nats-server -js -m 8222 -sd deployments/data/nats
+  linter-core:
+    cmds:
+      - dagger call linter --config build/ci/golangci.yaml --application-dir core/
+  linter-core-fix:
     cmds:
       - dagger call linter --config build/ci/golangci.yaml --application-dir core/ --fix directory --path /app/ export --path core
