@@ -4,11 +4,17 @@ import (
 	"context"
 	"os"
 
-	"eggmech/test2/internal"
+	"eggmech/autoChannelActivity/internal"
 )
 
 func main() {
 	ctx := context.Background()
 
-	os.Exit(internal.Run(ctx))
+	err := internal.Run(ctx)
+
+	if err != nil {
+		os.Exit(1)
+	}
+
+	os.Exit(0)
 }
