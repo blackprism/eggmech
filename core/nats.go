@@ -48,11 +48,12 @@ func Close(nc *nats.Conn) {
     nc.Close()
 }
 
-func Consume(ctx context.Context, name string, handler func(msg jetstream.Msg) bool) int {
+func Consume(ctx context.Context, consumerName string, handler func(msg jetstream.Msg) bool) int {
     ctx, cancel := signal.NotifyContext(ctx, os.Interrupt)
     defer cancel()
 
-    slog.Info(fmt.Sprintf("%s is now running. Press CTRL-C to exit.", name))
+    slog.Info(fmt.Sprintf("%s is now running. Press CTRL-C to exit.", consumerName))
+    streamName := GetStreams()[0].Name
 
     nc, success := Connect()
 
@@ -68,16 +69,20 @@ func Consume(ctx context.Context, name string, handler func(msg jetstream.Msg) b
         return 1
     }
 
-    stream, err := js.Stream(ctx, GetStreams()[0].Name)
+    stream, err := js.Stream(ctx, streamName)
     if err != nil {
-        slog.Error("Error creating stream", slog.String("name", GetStreams()[0].Name), slog.Any("error", err))
+        slog.Error("Error creating stream", slog.String("consumer", consumerName), slog.String("stream", streamName), slog.Any("error", err))
         return 1
     }
 
     //stream.DeleteConsumer(ctx, "testConsumer2")
     //return 1
 
-    dur := durableConsumer(ctx, name, stream)
+    dur, success := durableConsumer(ctx, consumerName, stream)
+
+    if !success {
+        return 1
+    }
 
     for {
         msgs, err := dur.Fetch(1)
@@ -101,7 +106,7 @@ func Consume(ctx context.Context, name string, handler func(msg jetstream.Msg) b
     }
 }
 
-func durableConsumer(ctx context.Context, name string, stream jetstream.Stream) jetstream.Consumer {
+func durableConsumer(ctx context.Context, name string, stream jetstream.Stream) (jetstream.Consumer, bool) {
     dur, err := stream.Consumer(ctx, name)
 
     // il va me dire early return ou pas ?
@@ -110,25 +115,23 @@ func durableConsumer(ctx context.Context, name string, stream jetstream.Stream) 
         msg, errLastMessage := stream.GetLastMsgForSubject(ctx, "")
 
         var startSeq uint64 = 1
-        if errLastMessage != nil {
-            println("3.1", errLastMessage.Error())
-        }
 
         if errLastMessage == nil {
             startSeq = msg.Sequence + 1
         }
 
-        println(startSeq)
+        slog.Info(fmt.Sprintf("Sequence for consumer starts at %d", startSeq), slog.String("name", name))
 
-        dur, errLastMessage = stream.CreateConsumer(ctx, jetstream.ConsumerConfig{
+        dur, errCreateConsumer := stream.CreateConsumer(ctx, jetstream.ConsumerConfig{
             Durable:       name,
             DeliverPolicy: jetstream.DeliverByStartSequencePolicy,
             OptStartSeq:   startSeq,
         })
 
-        if errLastMessage != nil {
-            println("4", errLastMessage.Error())
+        if errCreateConsumer != nil {
+            slog.Error("Error creating consumer", slog.String("consumer", name), slog.Any("error", err))
+            return nil, false
         }
     }
-    return dur
+    return dur, true
 }
