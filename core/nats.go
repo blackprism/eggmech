@@ -28,25 +28,39 @@ func GetStreams() []Stream {
     }
 }
 
+func Connect() (*nats.Conn, bool) {
+    nc, err := nats.Connect(nats.DefaultURL)
+
+    if err != nil {
+        slog.Error("Error connecting to nats", slog.Any("error", err))
+        return nil, false
+    }
+
+    return nc, true
+}
+
+func Close(nc *nats.Conn) {
+    err := nc.Drain()
+    if err != nil {
+        slog.Error("Error draining nats", slog.Any("error", err))
+    }
+
+    nc.Close()
+}
+
 func Consume(ctx context.Context, name string, handler func(msg jetstream.Msg) bool) int {
     ctx, cancel := signal.NotifyContext(ctx, os.Interrupt)
     defer cancel()
 
     slog.Info(fmt.Sprintf("%s is now running. Press CTRL-C to exit.", name))
 
-    nc, err := nats.Connect(nats.DefaultURL)
+    nc, success := Connect()
 
-    if err != nil {
-        slog.Error("Error connecting to nats", slog.Any("error", err))
+    if !success {
         return 1
     }
 
-    defer func(nc *nats.Conn) {
-        err := nc.Drain()
-        if err != nil {
-            slog.Error("Error draining nats", slog.Any("error", err))
-        }
-    }(nc)
+    defer Close(nc)
 
     js, err := jetstream.New(nc)
     if err != nil {
@@ -63,32 +77,7 @@ func Consume(ctx context.Context, name string, handler func(msg jetstream.Msg) b
     //stream.DeleteConsumer(ctx, "testConsumer2")
     //return 1
 
-    dur, err := stream.Consumer(ctx, name)
-
-    if errors.Is(err, jetstream.ErrConsumerNotFound) {
-        msg, errLastMessage := stream.GetLastMsgForSubject(ctx, "message.srm")
-
-        var startSeq uint64 = 1
-        if errLastMessage != nil {
-            println("3.1", errLastMessage.Error())
-        }
-
-        if errLastMessage == nil {
-            startSeq = msg.Sequence + 1
-        }
-
-        println(startSeq)
-
-        dur, errLastMessage = stream.CreateConsumer(ctx, jetstream.ConsumerConfig{
-            Durable:       "testConsumer2",
-            DeliverPolicy: jetstream.DeliverByStartSequencePolicy,
-            OptStartSeq:   startSeq,
-        })
-
-        if errLastMessage != nil {
-            println("4", errLastMessage.Error())
-        }
-    }
+    dur := durableConsumer(ctx, name, stream)
 
     for {
         msgs, err := dur.Fetch(1)
@@ -110,4 +99,36 @@ func Consume(ctx context.Context, name string, handler func(msg jetstream.Msg) b
             }
         }
     }
+}
+
+func durableConsumer(ctx context.Context, name string, stream jetstream.Stream) jetstream.Consumer {
+    dur, err := stream.Consumer(ctx, name)
+
+    // il va me dire early return ou pas ?
+
+    if errors.Is(err, jetstream.ErrConsumerNotFound) {
+        msg, errLastMessage := stream.GetLastMsgForSubject(ctx, "")
+
+        var startSeq uint64 = 1
+        if errLastMessage != nil {
+            println("3.1", errLastMessage.Error())
+        }
+
+        if errLastMessage == nil {
+            startSeq = msg.Sequence + 1
+        }
+
+        println(startSeq)
+
+        dur, errLastMessage = stream.CreateConsumer(ctx, jetstream.ConsumerConfig{
+            Durable:       name,
+            DeliverPolicy: jetstream.DeliverByStartSequencePolicy,
+            OptStartSeq:   startSeq,
+        })
+
+        if errLastMessage != nil {
+            println("4", errLastMessage.Error())
+        }
+    }
+    return dur
 }

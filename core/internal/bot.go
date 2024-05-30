@@ -20,13 +20,13 @@ func Run(ctx context.Context, getenv func(string) string) int {
     ctx, cancel := signal.NotifyContext(ctx, os.Interrupt)
     defer cancel()
 
-    nc, err := getNatsConnection()
+    nc, success := core.Connect()
 
-    if err != nil {
+    if !success {
         return 1
     }
 
-    defer deferNc(nc)
+    defer core.Close(nc)
 
     js, err := getJetstream(ctx, nc)
 
@@ -60,24 +60,6 @@ func Run(ctx context.Context, getenv func(string) string) int {
     <-ctx.Done()
 
     return 0
-}
-
-func getNatsConnection() (*nats.Conn, error) {
-    nc, err := nats.Connect(nats.DefaultURL)
-
-    if err != nil {
-        slog.Error("Error connecting to nats", slog.Any("error", err))
-        return nil, err
-    }
-
-    return nc, nil
-}
-
-func deferNc(nc *nats.Conn) {
-    err := nc.Drain()
-    if err != nil {
-        slog.Error("Error draining nats", slog.Any("error", err))
-    }
 }
 
 func getJetstream(ctx context.Context, nc *nats.Conn) (jetstream.JetStream, error) {
