@@ -25,12 +25,6 @@ func Run(ctx context.Context, getenv func(string) string) int {
 
     defer core.Close(nc)
 
-    js, err := core.Jetstream(ctx, nc)
-
-    if err != nil {
-        return 1
-    }
-
     client, err := disgo.New(getenv("DISCORD_TOKEN"),
         bot.WithGatewayConfigOpts(
             gateway.WithIntents(
@@ -39,13 +33,23 @@ func Run(ctx context.Context, getenv func(string) string) int {
                 gateway.IntentDirectMessages,
             ),
         ),
-        bot.WithEventListenerFunc(MessageHandler(ctx, js)),
-    )
+    )   
 
     if err != nil {
         slog.Error("Failed to create disgo", slog.Any("error", err))
         return 1
     }
+
+    streams, err := core.GetStreams(nc)
+
+    if err != nil {
+        slog.Error("Failed to get streams", slog.Any("error", err))
+        return 1
+    }
+
+    for _, stream := range streams {
+        stream.Register(ctx, client)
+    }                           
 
     if err = client.OpenGateway(ctx); err != nil {
         slog.Error("Failed to open gateway", slog.Any("error", err))

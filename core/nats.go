@@ -9,26 +9,70 @@ import (
 	"os/signal"
 	"time"
 
+	"github.com/disgoorg/disgo/bot"
+    "github.com/disgoorg/disgo/events"
 	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nats.go/jetstream"
 )
 
+var ErrNatConnectionNil = errors.New("nat connection is nil")
+
 const sleepBetweenConsumeFailure = 1 * time.Second
 
 type Stream struct {
-	Name     string
-	Subjects []string
+	Name string
+	Register func(ctx context.Context, client bot.Client)
 }
 
-func GetStreams() [1]Stream {
-	return [1]Stream{
+func GetStreams(nc *nats.Conn) ([]Stream, error) {
+	if nc == nil {
+		return []Stream{}, ErrNatConnectionNil
+	}
+
+	return []Stream{
 		{
-			Name: "MESSAGE",
-			Subjects: []string{
-				"message.>",
+			Register: func(ctx context.Context, client bot.Client) {
+				js, err := jetstreamConnect(
+					ctx, 
+					nc, 
+					"MESSAGE", 
+					[]string{
+						"message.>",
+					},
+				)
+
+				if err != nil {
+					return
+				}
+
+				client.AddEventListeners(&events.ListenerAdapter{
+					OnMessageCreate: MessageHandler(ctx, js, client.ID(), "message"),
+				})
 			},
 		},
-	}
+		{
+			Register: func(ctx context.Context, client bot.Client) {
+				js, err := jetstreamConnect(
+					ctx, 
+					nc, 
+					"ACTIVITY", 
+					[]string{
+						"activity.>",
+					},
+				)
+
+				if err != nil {
+					return
+				}
+
+				client.AddEventListeners(&events.ListenerAdapter{
+					OnUserActivityStart: ActivityStartHandler(ctx, js, client.ID(), "activity"),
+				})
+			},
+		},
+	}, nil
+
+
 }
 
 func Connect() (*nats.Conn, error) {
@@ -55,7 +99,7 @@ func Close(nc *nats.Conn) {
 	nc.Close()
 }
 
-func Jetstream(ctx context.Context, nc *nats.Conn) (jetstream.JetStream, error) {
+func jetstreamConnect(ctx context.Context, nc *nats.Conn, name string, subjects []string) (jetstream.JetStream, error) {
 	js, err := jetstream.New(nc)
 
 	if err != nil {
@@ -64,8 +108,8 @@ func Jetstream(ctx context.Context, nc *nats.Conn) (jetstream.JetStream, error) 
 	}
 
 	cfg := jetstream.StreamConfig{
-		Name:       GetStreams()[0].Name,
-		Subjects:   GetStreams()[0].Subjects,
+		Name:       name,
+		Subjects:   subjects,
 		MaxAge:     7 * 24 * time.Hour,
 		Duplicates: 10 * time.Second,
 		Storage:    jetstream.FileStorage,
@@ -80,12 +124,11 @@ func Jetstream(ctx context.Context, nc *nats.Conn) (jetstream.JetStream, error) 
 	return js, nil
 }
 
-func Consume(ctx context.Context, consumerName string, handler func(msg jetstream.Msg) error) error {
+func Consume(ctx context.Context, consumerName string, streamName string, subjects []string, handler func(msg jetstream.Msg) error) error {
 	ctx, cancel := signal.NotifyContext(ctx, os.Interrupt)
 	defer cancel()
 
 	slog.Info(fmt.Sprintf("%s is now running. Press CTRL-C to exit.", consumerName))
-	streamName := GetStreams()[0].Name
 
 	nc, err := Connect()
 
@@ -110,7 +153,7 @@ func Consume(ctx context.Context, consumerName string, handler func(msg jetstrea
 	//stream.DeleteConsumer(ctx, "testConsumer2")
 	//return 1
 
-	dur, err := durableConsumer(ctx, consumerName, stream)
+	dur, err := durableConsumer(ctx, consumerName, stream, subjects)
 
 	if err != nil {
 		return err
@@ -150,11 +193,11 @@ func Consume(ctx context.Context, consumerName string, handler func(msg jetstrea
 	}
 }
 
-func durableConsumer(ctx context.Context, consumerName string, stream jetstream.Stream) (jetstream.Consumer, error) {
+func durableConsumer(ctx context.Context, consumerName string, stream jetstream.Stream, subjects []string) (jetstream.Consumer, error) {
 	dur, err := stream.Consumer(ctx, consumerName)
 
 	if err == nil {
-		return dur, err
+		return dur, nil
 	}
 
 	if !errors.Is(err, jetstream.ErrConsumerNotFound) {
@@ -176,6 +219,7 @@ func durableConsumer(ctx context.Context, consumerName string, stream jetstream.
 		Durable:       consumerName,
 		DeliverPolicy: jetstream.DeliverByStartSequencePolicy,
 		OptStartSeq:   startSeq,
+		FilterSubjects: subjects,
 	})
 
 	if errCreateConsumer != nil {
