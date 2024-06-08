@@ -4,6 +4,16 @@ on:
   - pull_request
 
 jobs:
-  lint:
-    uses: ./.github/workflows/linter.yaml
-    secrets: inherit
+  linter:
+    name: linter
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2
+
+      - name: linter
+        uses: dagger/dagger-for-github@v5
+        with:
+          verb: call
+          args: linter --config build/ci/golangci.yaml --application-dir . --directory core
+          cloud-token: ${{ secrets.DAGGER_CLOUD_TOKEN }}
