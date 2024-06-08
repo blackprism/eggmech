@@ -35,6 +35,7 @@ func Run(ctx context.Context, getenv func(string) string) error {
 		}
 
 		slog.Info("received from durable consumer", slog.Any("event", event), slog.Any("subject", msg.Subject()))
+
 		return nil
 	})
 }
