@@ -5,11 +5,13 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"time"
 
 	"github.com/disgoorg/disgo"
 	"github.com/disgoorg/disgo/bot"
 	"github.com/disgoorg/disgo/events"
 	"github.com/disgoorg/disgo/gateway"
+	"github.com/nats-io/nats.go/jetstream"
 	"github.com/samber/oops"
 
 	"eggmech/core"
@@ -19,7 +21,7 @@ func Run(ctx context.Context, getenv func(string) string) error {
 	ctx, cancel := signal.NotifyContext(ctx, os.Interrupt)
 	defer cancel()
 
-	nc, err := core.Connect(getenv("NATS_URL"))
+	nc, err := core.Connect(getenv("NATS_URL"), -1)
 
 	if err != nil {
 		return oops.Wrapf(err, "error connecting to nats server")
@@ -42,13 +44,16 @@ func Run(ctx context.Context, getenv func(string) string) error {
 		return oops.Wrapf(err, "error connecting to disgo")
 	}
 
-	js, err := core.JetstreamConnect(
+	jsConn, err := core.JetstreamConnect(
 		ctx,
 		nc,
 		"ACTIVITY",
 		[]string{
 			"activity.>",
 		},
+		7*24*time.Hour,
+		10*time.Second,
+		jetstream.FileStorage,
 	)
 
 	if err != nil {
@@ -56,7 +61,7 @@ func Run(ctx context.Context, getenv func(string) string) error {
 	}
 
 	discord.AddEventListeners(&events.ListenerAdapter{
-		OnPresenceUpdate: core.PresenceHandler(ctx, js, discord.ID(), "activity"),
+		OnPresenceUpdate: core.PresenceHandler(ctx, jsConn, discord.ID(), "activity"),
 	})
 
 	if err = discord.OpenGateway(ctx); err != nil {

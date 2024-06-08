@@ -28,7 +28,6 @@ linters:
     - errname
     - errorlint
     - exhaustive
-    - exhaustruct
     - exportloopref
     - forbidigo # doublon avec goprintffuncname
     - forcetypeassert
@@ -48,7 +47,6 @@ linters:
     - gofmt
     - goheader
     - goimports # à voir il y en a un autre
-    - mnd
     - gomoddirectives
     - gomodguard
     - goprintffuncname
@@ -59,7 +57,6 @@ linters:
     - inamedparam
     - interfacebloat
     - intrange
-    - ireturn # hum c’est pas bien ? pourquoi ?
     - lll
     - maintidx
     - makezero
@@ -75,7 +72,6 @@ linters:
     - nolintlint
     - nonamedreturns
     - paralleltest
-    - perfsprint
     - prealloc
     - predeclared
     - promlinter

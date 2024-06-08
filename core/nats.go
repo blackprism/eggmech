@@ -11,40 +11,39 @@ import (
 	"github.com/samber/oops"
 )
 
-const sleepBetweenConsumeFailure = 1 * time.Second
-const maxReconnects = -1
-
-var StreamConfigMaxAge = 7 * 24 * time.Hour
-var StreamConfigDuplicates = 10 * time.Second
-var StreamConfigStorage = jetstream.FileStorage
-
-func Connect(url string) (*nats.Conn, error) {
-	nc, err := nats.Connect(url, nats.MaxReconnects(maxReconnects))
+func Connect(url string, maxReconnects int) (*nats.Conn, error) {
+	natsConn, err := nats.Connect(url, nats.MaxReconnects(maxReconnects))
 
 	if err != nil {
 		return nil, oops.Wrapf(err, "error connecting to nats")
 	}
 
-	return nc, nil
+	return natsConn, nil
 }
 
-func Close(nc *nats.Conn) {
-	if nc == nil {
+func Close(natsConn *nats.Conn) {
+	if natsConn == nil {
 		return
 	}
 
-	err := nc.Drain()
+	err := natsConn.Drain()
 	if err != nil {
 		slog.Error("failed to drain nats connection", slog.Any("error", oops.Wrap(err)))
 	}
 
-	nc.Close()
-
-	return
+	natsConn.Close()
 }
 
-func JetstreamConnect(ctx context.Context, nc *nats.Conn, name string, subjects []string) (jetstream.JetStream, error) {
-	js, err := jetstream.New(nc)
+func JetstreamConnect(
+	ctx context.Context,
+	natsConn *nats.Conn,
+	name string,
+	subjects []string,
+	maxAge time.Duration,
+	duplicates time.Duration,
+	storage jetstream.StorageType,
+) (jetstream.JetStream, error) {
+	jsConn, err := jetstream.New(natsConn)
 
 	if err != nil {
 		return nil, oops.Wrapf(err, "error creating jetstream instance")
@@ -53,18 +52,18 @@ func JetstreamConnect(ctx context.Context, nc *nats.Conn, name string, subjects 
 	cfg := jetstream.StreamConfig{
 		Name:       name,
 		Subjects:   subjects,
-		MaxAge:     StreamConfigMaxAge,
-		Duplicates: StreamConfigDuplicates,
-		Storage:    StreamConfigStorage,
+		MaxAge:     maxAge,
+		Duplicates: duplicates,
+		Storage:    storage,
 	}
 
-	err = createOrUpdateStream(ctx, js, cfg)
+	err = createOrUpdateStream(ctx, jsConn, cfg)
 
 	if err != nil {
 		return nil, oops.Wrapf(err, "error creating or updating stream")
 	}
 
-	return js, nil
+	return jsConn, nil
 }
 
 func streamExists(ctx context.Context, js jetstream.JetStream, cfg jetstream.StreamConfig) bool {
@@ -77,32 +76,48 @@ func streamExists(ctx context.Context, js jetstream.JetStream, cfg jetstream.Str
 	return false
 }
 
-func createOrUpdateStream(ctx context.Context, js jetstream.JetStream, cfg jetstream.StreamConfig) error {
-	if streamExists(ctx, js, cfg) {
-		_, err := js.UpdateStream(ctx, cfg)
+func createOrUpdateStream(ctx context.Context, jsConn jetstream.JetStream, cfg jetstream.StreamConfig) error {
+	if streamExists(ctx, jsConn, cfg) {
+		_, err := jsConn.UpdateStream(ctx, cfg)
 
 		return oops.Wrapf(err, "error updating stream")
 	}
 
-	_, err := js.CreateStream(ctx, cfg)
+	_, err := jsConn.CreateStream(ctx, cfg)
 
 	return oops.Wrapf(err, "error creating stream")
 }
 
-func ConsumeActivity(ctx context.Context, nc *nats.Conn, consumerName string, subjects []string, handler func(msg jetstream.Msg) error) error {
-	return consume(ctx, nc, consumerName, "ACTIVITY", subjects, handler)
+func ConsumeActivity(
+	ctx context.Context,
+	natsConn *nats.Conn,
+	consumerName string,
+	subjects []string,
+	handler func(msg jetstream.Msg) error,
+) error {
+	return consume(ctx, natsConn, consumerName, "ACTIVITY", subjects, handler)
 }
 
-func consume(ctx context.Context, nc *nats.Conn, consumerName string, streamName string, subjects []string, handler func(msg jetstream.Msg) error) error {
+func consume(
+	ctx context.Context,
+	natsConn *nats.Conn,
+	consumerName string,
+	streamName string,
+	subjects []string,
+	handler func(msg jetstream.Msg) error,
+) error {
 	slog.Info(fmt.Sprintf("%s is now running. Press CTRL-C to exit.", consumerName))
-	defer Close(nc)
 
-	js, err := jetstream.New(nc)
+	defer Close(natsConn)
+
+	sleepBetweenConsumeFailure := 2 * time.Second
+
+	jsConn, err := jetstream.New(natsConn)
 	if err != nil {
 		return oops.Wrapf(err, "error creating jetstream instance")
 	}
 
-	stream, err := js.Stream(ctx, streamName)
+	stream, err := jsConn.Stream(ctx, streamName)
 	if err != nil {
 		return oops.
 			With("consumer", consumerName).
@@ -122,6 +137,7 @@ func consume(ctx context.Context, nc *nats.Conn, consumerName string, streamName
 		if errFetch != nil {
 			slog.Error("error fetching", slog.String("consumer", consumerName), slog.Any("error", oops.Wrap(errFetch)))
 			time.Sleep(sleepBetweenConsumeFailure)
+
 			continue
 		}
 
@@ -129,26 +145,42 @@ func consume(ctx context.Context, nc *nats.Conn, consumerName string, streamName
 		case <-ctx.Done():
 			return nil
 		case msg := <-msgs.Messages():
-			if msg != nil {
-				errHandler := handler(msg)
-
-				if errHandler != nil {
-					slog.Error("error consumer handler", slog.String("consumer", consumerName), slog.Any("error", errHandler))
-					time.Sleep(sleepBetweenConsumeFailure)
-
-					continue
-				}
-
-				errAck := msg.Ack()
-				if errAck != nil {
-					slog.Error("error consumer ack", slog.String("consumer", consumerName), slog.Any("error", errAck))
-				}
-			}
+			handleMessage(consumerName, handler, sleepBetweenConsumeFailure, &msg)
 		}
 	}
 }
 
-func durableConsumer(ctx context.Context, consumerName string, stream jetstream.Stream, subjects []string) (jetstream.Consumer, error) {
+func handleMessage(
+	consumerName string,
+	handler func(msg jetstream.Msg) error,
+	sleepBetweenConsumeFailure time.Duration,
+	msg *jetstream.Msg,
+) {
+	if msg == nil {
+		return
+	}
+
+	errHandler := handler(*msg)
+
+	if errHandler != nil {
+		slog.Error("error consumer handler", slog.String("consumer", consumerName), slog.Any("error", errHandler))
+		time.Sleep(sleepBetweenConsumeFailure)
+
+		return
+	}
+
+	errAck := (*msg).Ack()
+	if errAck != nil {
+		slog.Error("error consumer ack", slog.String("consumer", consumerName), slog.Any("error", errAck))
+	}
+}
+
+func durableConsumer(
+	ctx context.Context,
+	consumerName string,
+	stream jetstream.Stream,
+	subjects []string,
+) (jetstream.Consumer, error) {
 	dur, errCreateConsumer := stream.CreateOrUpdateConsumer(ctx, jetstream.ConsumerConfig{
 		Durable:        consumerName,
 		DeliverPolicy:  jetstream.DeliverNewPolicy,
