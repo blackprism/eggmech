@@ -27,6 +27,4 @@ func main() {
 		slog.Error("failed to start server", slog.Any("error", err))
 		os.Exit(1)
 	}
-
-	os.Exit(0)
 }

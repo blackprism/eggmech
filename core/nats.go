@@ -79,14 +79,14 @@ func streamExists(ctx context.Context, js jetstream.JetStream, cfg jetstream.Str
 
 func createOrUpdateStream(ctx context.Context, js jetstream.JetStream, cfg jetstream.StreamConfig) error {
 	if streamExists(ctx, js, cfg) {
-		_, err := js.CreateStream(ctx, cfg)
+		_, err := js.UpdateStream(ctx, cfg)
 
-		return oops.Wrapf(err, "error creating stream")
+		return oops.Wrapf(err, "error updating stream")
 	}
 
-	_, err := js.UpdateStream(ctx, cfg)
+	_, err := js.CreateStream(ctx, cfg)
 
-	return oops.Wrapf(err, "error updating stream")
+	return oops.Wrapf(err, "error creating stream")
 }
 
 func ConsumeActivity(ctx context.Context, nc *nats.Conn, consumerName string, subjects []string, handler func(msg jetstream.Msg) error) error {
