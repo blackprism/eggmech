@@ -22,7 +22,7 @@ func Run(ctx context.Context, getenv func(string) string) error {
 	ctx, cancel := signal.NotifyContext(ctx, os.Interrupt)
 	defer cancel()
 
-	nc, err := core.Connect(getenv("NATS_URL"))
+	nc, err := core.Connect(getenv("NATS_URL"), -1)
 
 	if err != nil {
 		return oops.Wrapf(err, "failed to connect to nats")

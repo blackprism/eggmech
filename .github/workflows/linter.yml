@@ -1,0 +1,6 @@
+- name: linter
+  uses: dagger/dagger-for-github@v5
+  with:
+    verb: call
+    args: linter --config build/ci/golangci.yaml --application-dir core/
+    cloud-token: ${{ secrets.DAGGER_CLOUD_TOKEN }}
