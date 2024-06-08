@@ -10,15 +10,17 @@ func (e *Eggmech) Linter(
 	ctx context.Context,
 	// configuration file of golangci-lint
 	config *File,
-	
+
 	// application directory source
 	applicationDir *Directory,
+
+	directory string,
 
 	// fix files when its possible
 	// +optional
 	fix bool,
 ) *Container {
-	entrypoint := []string{"golangci-lint", "run", "-c", "/.golangci.yaml", "."}
+	entrypoint := []string{"golangci-lint", "run", "-c", "/.golangci.yaml", "./..."}
 
 	if fix {
 		entrypoint = append(entrypoint, "--fix", "--issues-exit-code", "0")
@@ -28,7 +30,7 @@ func (e *Eggmech) Linter(
 		From("golangci/golangci-lint:v1.58.1").
 		WithMountedDirectory("/app", applicationDir).
 		WithFile("/.golangci.yaml", config).
-		WithWorkdir("/app").
+		WithWorkdir("/app/" + directory).
 		WithExec(entrypoint)
 }
 
