@@ -5,19 +5,12 @@ import (
 	"log/slog"
 	"os"
 
-	"github.com/google/gops/agent"
-	_ "github.com/joho/godotenv/autoload"
-
+	"eggmech/autochannelactivity/internal"
 	"eggmech/core"
-	"eggmech/core/internal"
 )
 
 func main() {
 	ctx := context.Background()
-
-	if err := agent.Listen(agent.Options{}); err != nil {
-		slog.Error("error creating agent", slog.Any("error", err))
-	}
 
 	core.SetupLogger()
 

@@ -1,63 +1,70 @@
 package internal
 
 import (
-    "context"
-    "log/slog"
-    "os"
-    "os/signal"
+	"context"
+	"log/slog"
+	"os"
+	"os/signal"
 
-    "eggmech/core"
+	"github.com/disgoorg/disgo"
+	"github.com/disgoorg/disgo/bot"
+	"github.com/disgoorg/disgo/events"
+	"github.com/disgoorg/disgo/gateway"
+	"github.com/samber/oops"
 
-    "github.com/disgoorg/disgo"
-    "github.com/disgoorg/disgo/bot"
-    "github.com/disgoorg/disgo/gateway"
+	"eggmech/core"
 )
 
-func Run(ctx context.Context, getenv func(string) string) int {
-    ctx, cancel := signal.NotifyContext(ctx, os.Interrupt)
-    defer cancel()
+func Run(ctx context.Context, getenv func(string) string) error {
+	ctx, cancel := signal.NotifyContext(ctx, os.Interrupt)
+	defer cancel()
 
-    nc, err := core.Connect()
+	nc, err := core.Connect(getenv("NATS_URL"))
 
-    if err != nil {
-        return 1
-    }
+	if err != nil {
+		return oops.Wrapf(err, "error connecting to nats server")
+	}
 
-    defer core.Close(nc)
+	defer core.Close(nc)
 
-    client, err := disgo.New(getenv("DISCORD_TOKEN"),
-        bot.WithGatewayConfigOpts(
-            gateway.WithIntents(
-                gateway.IntentGuilds,
-                gateway.IntentGuildMessages,
-                gateway.IntentDirectMessages,
-            ),
-        ),
-    )   
+	discord, err := disgo.New(getenv("DISCORD_TOKEN"),
+		bot.WithGatewayConfigOpts(
+			gateway.WithIntents(
+				gateway.IntentGuilds,
+				gateway.IntentGuildMessages,
+				gateway.IntentDirectMessages,
+				gateway.IntentGuildPresences,
+			),
+		),
+	)
 
-    if err != nil {
-        slog.Error("Failed to create disgo", slog.Any("error", err))
-        return 1
-    }
+	if err != nil {
+		return oops.Wrapf(err, "error connecting to disgo")
+	}
 
-    streams, err := core.GetStreams(nc)
+	js, err := core.JetstreamConnect(
+		ctx,
+		nc,
+		"ACTIVITY",
+		[]string{
+			"activity.>",
+		},
+	)
 
-    if err != nil {
-        slog.Error("Failed to get streams", slog.Any("error", err))
-        return 1
-    }
+	if err != nil {
+		return oops.Wrapf(err, "error connecting to Jetstream")
+	}
 
-    for _, stream := range streams {
-        stream.Register(ctx, client)
-    }                           
+	discord.AddEventListeners(&events.ListenerAdapter{
+		OnPresenceUpdate: core.PresenceHandler(ctx, js, discord.ID(), "activity"),
+	})
 
-    if err = client.OpenGateway(ctx); err != nil {
-        slog.Error("Failed to open gateway", slog.Any("error", err))
-        return 1
-    }
+	if err = discord.OpenGateway(ctx); err != nil {
+		return oops.Wrapf(err, "error connecting to Discord")
+	}
 
-    slog.Info("Bot is now running. Press CTRL-C to exit.")
-    <-ctx.Done()
+	slog.Info("Bot is now running. Press CTRL-C to exit.")
+	<-ctx.Done()
 
-    return 0
+	return nil
 }

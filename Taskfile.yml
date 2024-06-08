@@ -3,7 +3,7 @@ version: "3"
 tasks:
   nats:
     cmds:
-      - nats-server -js -m 8222 -sd deployments/data/nats
+      - nats-server -D -js -m 8222 -sd deployments/data/nats
   linter-core:
     cmds:
       - dagger call linter --config build/ci/golangci.yaml --application-dir core/
