@@ -4,5 +4,5 @@ use (
 	./build/ci/dagger
 	./core
 	./test
-	./test2
+	./autochannelactivity
 )
