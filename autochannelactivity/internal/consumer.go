@@ -20,13 +20,13 @@ func Run(ctx context.Context, getenv func(string) string) error {
 	ctx, cancel := signal.NotifyContext(ctx, os.Interrupt)
 	defer cancel()
 
-	nc, err := core.Connect(getenv("NATS_URL"), -1)
+	natsConn, err := core.Connect(getenv("NATS_URL"), -1)
 
 	if err != nil {
 		return oops.Wrapf(err, "failed to connect to nats")
 	}
 
-	return core.ConsumeActivity(ctx, nc, Name, []string{"activity.gaming"}, func(msg jetstream.Msg) error {
+	return core.ConsumeActivity(ctx, natsConn, Name, []string{"activity.gaming"}, func(msg jetstream.Msg) error {
 		var event *events.PresenceUpdate
 		err := json.Unmarshal(msg.Data(), &event)
 

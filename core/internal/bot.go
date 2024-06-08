@@ -21,13 +21,13 @@ func Run(ctx context.Context, getenv func(string) string) error {
 	ctx, cancel := signal.NotifyContext(ctx, os.Interrupt)
 	defer cancel()
 
-	nc, err := core.Connect(getenv("NATS_URL"), -1)
+	natsConn, err := core.Connect(getenv("NATS_URL"), -1)
 
 	if err != nil {
 		return oops.Wrapf(err, "error connecting to nats server")
 	}
 
-	defer core.Close(nc)
+	defer core.Close(natsConn)
 
 	discord, err := disgo.New(getenv("DISCORD_TOKEN"),
 		bot.WithGatewayConfigOpts(
@@ -46,7 +46,7 @@ func Run(ctx context.Context, getenv func(string) string) error {
 
 	jsConn, err := core.JetstreamConnect(
 		ctx,
-		nc,
+		natsConn,
 		"ACTIVITY",
 		[]string{
 			"activity.>",

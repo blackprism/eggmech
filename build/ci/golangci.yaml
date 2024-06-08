@@ -32,7 +32,6 @@ linters:
     - forbidigo # doublon avec goprintffuncname
     - forcetypeassert
     - funlen
-    - gci # à voir, conflit avec jetbrains ? hum chelou le -ed ?
     - gocheckcompilerdirectives
     - gochecknoglobals
     - gochecknoinits
