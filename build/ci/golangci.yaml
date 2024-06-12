@@ -94,3 +94,8 @@ linters:
     - wastedassign
     - whitespace
     - wsl
+linters-settings:
+  varnamelen:
+    ignore-names:
+      - err
+      - db

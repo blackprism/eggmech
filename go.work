@@ -3,6 +3,5 @@ go 1.22.2
 use (
 	./build/ci/dagger
 	./core
-	./test
 	./autochannelactivity
 )

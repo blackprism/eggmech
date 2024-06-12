@@ -5,7 +5,9 @@ import (
 	"log/slog"
 	"os"
 
-	"eggmech/autochannelactivity/internal"
+	_ "github.com/joho/godotenv/autoload"
+
+	"eggmech/autochannelactivity"
 	"eggmech/core"
 )
 
@@ -14,7 +16,7 @@ func main() {
 
 	core.SetupLogger()
 
-	err := internal.Run(ctx, os.Getenv)
+	err := autochannelactivity.Run(ctx, os.Getenv)
 
 	if err != nil {
 		slog.Error("failed to start server", slog.Any("error", err))

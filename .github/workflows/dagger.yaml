@@ -18,7 +18,7 @@ jobs:
           args: linter --config build/ci/golangci.yaml --application-dir . --directory core
           cloud-token: ${{ secrets.DAGGER_CLOUD_TOKEN }}
 
-      - name: linter core
+      - name: linter autochannelactivity
         uses: dagger/dagger-for-github@v5
         with:
           verb: call

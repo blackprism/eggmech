@@ -9,7 +9,6 @@ import (
 	_ "github.com/joho/godotenv/autoload"
 
 	"eggmech/core"
-	"eggmech/core/internal"
 )
 
 func main() {
@@ -21,7 +20,7 @@ func main() {
 
 	core.SetupLogger()
 
-	err := internal.Run(ctx, os.Getenv)
+	err := core.Run(ctx, os.Getenv)
 
 	if err != nil {
 		slog.Error("failed to start server", slog.Any("error", err))

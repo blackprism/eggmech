@@ -156,7 +156,7 @@ func handleMessage(
 	sleepBetweenConsumeFailure time.Duration,
 	msg *jetstream.Msg,
 ) {
-	if msg == nil {
+	if *msg == nil {
 		return
 	}
 
