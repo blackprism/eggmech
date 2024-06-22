@@ -4,11 +4,11 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"fmt"
 	"log/slog"
 	"os"
 	"os/signal"
 	"strings"
+	"time"
 
 	"github.com/disgoorg/disgo/discord"
 	"github.com/disgoorg/disgo/events"
@@ -24,6 +24,14 @@ import (
 )
 
 const Name = "autoChannelActivity"
+const categoryGame = "game"
+const categoryArchive = "game archive"
+
+type TraceableActivity struct {
+	UUID      Uuidv7
+	Name      string
+	CreatedAt time.Time
+}
 
 func Run(ctx context.Context, getenv func(string) string) error {
 	ctx, cancel := signal.NotifyContext(ctx, os.Interrupt)
@@ -102,118 +110,29 @@ func processActivitiesToClose(
 	event *events.PresenceUpdate,
 	currentActivities []CurrentActivity,
 ) {
-	_ = client
 	for _, currentActivity := range currentActivities {
-		found := false
+		foundInActivity := false
 
 		for _, activity := range event.Activities {
 			if activity.Name == currentActivity.Name {
-				found = true
+				foundInActivity = true
 
 				break
 			}
 		}
 
-		if !found {
-			_, err := closeActivityStatement.ExecContext(ctx, currentActivity.UUID)
-			if err != nil {
-				slog.Error("failed to close activity", slog.Any("error", oops.Wrap(err)))
-			}
-
-			channels, err := client.GetGuildChannels(event.GuildID)
-			if err != nil {
-				slog.Error("failed to get channels", slog.Any("error", oops.Wrap(err)))
-			}
-
-			name := "te-" + slug.Make(currentActivity.Name)
-			var channelFound snowflake.ID
-			var channelFoundCategory snowflake.ID
-			var categoryArchived snowflake.ID
-			var categoryGame snowflake.ID
-
-			for _, channel := range channels {
-				if channel.Name() == name {
-					channelFound = channel.ID()
-					channelFoundCategory = *channel.ParentID()
-				}
-
-				if channel.Name() == "archive-game" && channel.Type() == discord.ChannelTypeGuildCategory {
-					categoryArchived = channel.ID()
-				}
-
-				if channel.Type() == discord.ChannelTypeGuildCategory && strings.ToLower(channel.Name()) == "game" {
-					categoryGame = channel.ID()
-				}
-			}
-
-			if channelFound == 0 {
-				continue
-			}
-
-			var channelsToUpdate []discord.GuildChannelPositionUpdate
-			var channelPosition int
-
-			for _, channel := range channels {
-				if channel.ParentID() != nil && *channel.ParentID() == categoryArchived && channel.Name() < name {
-					channelPosition = channel.Position() + 1
-				}
-			}
-
-			channelsToUpdate = append(channelsToUpdate, discord.GuildChannelPositionUpdate{
-				ID:       channelFound,
-				ParentID: &categoryArchived,
-				Position: disgojson.NewNullablePtr(channelPosition),
-			})
-
-			for _, channel := range channels {
-				if channel.ParentID() != nil && *channel.ParentID() == categoryArchived && channelPosition > 0 && channel.Position() >= channelPosition {
-					channelsToUpdate = append(channelsToUpdate, discord.GuildChannelPositionUpdate{
-						ID:       channel.ID(),
-						Position: disgojson.NewNullablePtr(channel.Position() + 1),
-					})
-				}
-			}
-
-			if categoryArchived == 0 {
-				archiveChannel, err := client.CreateGuildChannel(event.GuildID, discord.GuildCategoryChannelCreate{
-					Name:                 "archive-game",
-					Position:             0,
-					PermissionOverwrites: nil,
-				})
-
-				if err != nil {
-					slog.Error("cannot create category game", slog.Any("error", oops.Wrap(err)))
-					return
-				}
-
-				categoryArchived = archiveChannel.ID()
-			}
-
-			if categoryGame == 0 {
-				gameChannel, err := client.CreateGuildChannel(event.GuildID, discord.GuildCategoryChannelCreate{
-					Name:                 "game",
-					Position:             0,
-					PermissionOverwrites: nil,
-				})
-
-				if err != nil {
-					slog.Error("cannot create category game", slog.Any("error", oops.Wrap(err)))
-					return
-				}
-
-				categoryGame = gameChannel.ID()
-			}
-
-			slog.Info("channel to update", slog.Any("channel", channelFound))
-			if channelFoundCategory == categoryGame {
-				client.UpdateChannelPositions(event.GuildID, []discord.GuildChannelPositionUpdate{
-					{
-						ID:       channelFound,
-						ParentID: &categoryArchived,
-						Position: disgojson.NewNullablePtr(channelPosition),
-					},
-				})
-			}
+		if !foundInActivity {
+			processActivity(
+				ctx,
+				client,
+				closeActivityStatement,
+				event,
+				TraceableActivity{
+					UUID:      currentActivity.UUID,
+					Name:      currentActivity.Name,
+					CreatedAt: time.Now(),
+				},
+			)
 		}
 	}
 }
@@ -226,137 +145,255 @@ func processActivitiesToCreate(
 	currentActivities []CurrentActivity,
 ) {
 	for _, eventActivity := range event.Activities {
-		found := false
+		foundInDatabase := false
 
 		for _, activity := range currentActivities {
 			if activity.Name == eventActivity.Name {
-				found = true
+				foundInDatabase = true
 
 				break
 			}
 		}
 
-		if !found {
-			slog.Warn("1. NEWWWWWWWWW ACTIVITY")
-
-			uuidv7, err := uuid.NewV7()
-			if err != nil {
-				slog.Error("failed to generate uuid", slog.Any("error", oops.Wrap(err)))
-			}
-
-			_, err = insertStatement.ExecContext(
+		if !foundInDatabase {
+			processActivity(
 				ctx,
-				uuidv7,
-				event.GuildID,
-				event.PresenceUser.ID,
-				eventActivity.Name,
-				eventActivity.CreatedAt,
+				client,
+				insertStatement,
+				event,
+				TraceableActivity{
+					UUID:      "",
+					Name:      eventActivity.Name,
+					CreatedAt: eventActivity.CreatedAt,
+				},
 			)
-			if err != nil {
-				slog.Error("failed to insert activity", slog.Any("error", oops.Wrap(err)))
-			}
-
-			channels, err := client.GetGuildChannels(event.GuildID)
-			if err != nil {
-				slog.Error("failed to get channels", slog.Any("error", oops.Wrap(err)))
-			}
-
-			name := "te-" + slug.Make(eventActivity.Name)
-			var channelFound snowflake.ID
-			var channelFoundCategory snowflake.ID
-			var categoryArchived snowflake.ID
-			var categoryGame snowflake.ID
-
-			for _, channel := range channels {
-				if channel.Name() == name {
-					channelFound = channel.ID()
-					channelFoundCategory = *channel.ParentID()
-				}
-
-				if channel.Name() == "archive-game" && channel.Type() == discord.ChannelTypeGuildCategory {
-					categoryArchived = channel.ID()
-				}
-
-				if channel.Type() == discord.ChannelTypeGuildCategory && strings.ToLower(channel.Name()) == "game" {
-					categoryGame = channel.ID()
-				}
-			}
-
-			var channelsToUpdate []discord.GuildChannelPositionUpdate
-			var channelPosition int
-
-			for _, channel := range channels {
-				println(channel.Position(), channel.Name())
-				if channel.ParentID() != nil && *channel.ParentID() == categoryGame && channel.Name() < name {
-					channelPosition = channel.Position() + 1
-					println("position", channelPosition)
-				}
-			}
-
-			channelsToUpdate = append(channelsToUpdate, discord.GuildChannelPositionUpdate{
-				ID:       channelFound,
-				ParentID: &categoryGame,
-				Position: disgojson.NewNullablePtr(channelPosition),
-			})
-
-			for _, channel := range channels {
-				if channel.ParentID() != nil && *channel.ParentID() == categoryGame && channelPosition > 0 && channel.Position() >= channelPosition {
-					channelsToUpdate = append(channelsToUpdate, discord.GuildChannelPositionUpdate{
-						ID:       channel.ID(),
-						Position: disgojson.NewNullablePtr(channel.Position() + 1),
-					})
-				}
-			}
-
-			if categoryGame == 0 {
-				gameChannel, err := client.CreateGuildChannel(event.GuildID, discord.GuildCategoryChannelCreate{
-					Name:                 "game",
-					Position:             0,
-					PermissionOverwrites: nil,
-				})
-
-				if err != nil {
-					slog.Error("cannot create category game", slog.Any("error", oops.Wrap(err)))
-					return
-				}
-
-				categoryGame = gameChannel.ID()
-			}
-
-			if categoryArchived == 0 {
-				archiveChannel, err := client.CreateGuildChannel(event.GuildID, discord.GuildCategoryChannelCreate{
-					Name:                 "archive-game",
-					Position:             0,
-					PermissionOverwrites: nil,
-				})
-
-				if err != nil {
-					slog.Error("cannot create category game", slog.Any("error", oops.Wrap(err)))
-					return
-				}
-
-				categoryArchived = archiveChannel.ID()
-			}
-
-			if channelFound == 0 {
-				_, err = client.CreateGuildChannel(event.GuildID, discord.GuildTextChannelCreate{
-					Name:     name,
-					ParentID: categoryGame,
-				})
-				if err != nil {
-					slog.Error("cannot create channel", slog.Any("error", oops.Wrap(err)))
-					return
-				}
-
-				continue
-			}
-
-			if channelFoundCategory == categoryArchived {
-				client.UpdateChannelPositions(event.GuildID, channelsToUpdate)
-				for _, channelToUpdate := range channelsToUpdate {
-					fmt.Printf("%d %v\n", channelToUpdate.ID, *channelToUpdate.Position)
-				}
-			}
 		}
 	}
+}
+
+func processActivity(
+	ctx context.Context,
+	client rest.Rest,
+	statement *sql.Stmt,
+	event *events.PresenceUpdate,
+	activity TraceableActivity,
+) {
+	uuidv7, err := uuid.NewV7()
+	if err != nil {
+		slog.Error("failed to generate uuid", slog.Any("error", oops.Wrap(err)))
+
+		return
+	}
+
+	if activity.UUID == "" {
+		_, err = statement.ExecContext(
+			ctx,
+			uuidv7,
+			event.GuildID,
+			event.PresenceUser.ID,
+			activity.Name,
+			activity.CreatedAt,
+		)
+		if err != nil {
+			slog.Error("failed to insert activity", slog.Any("error", oops.Wrap(err)))
+
+			return
+		}
+	}
+
+	if activity.UUID != "" {
+		_, err = statement.ExecContext(ctx, activity.UUID)
+		if err != nil {
+			slog.Error("failed to close activity", slog.Any("error", oops.Wrap(err)))
+		}
+	}
+
+	channels, err := client.GetGuildChannels(event.GuildID)
+	if err != nil {
+		slog.Error("failed to get channels", slog.Any("error", oops.Wrap(err)))
+
+		return
+	}
+
+	name := slug.Make(activity.Name)
+	channelID, channelCategoryID, categoryGameID, categoryArchiveID := findChannelsID(name, channels)
+
+	moveToCategory := categoryGameID
+
+	if activity.UUID != "" {
+		moveToCategory = categoryArchiveID
+	}
+
+	channelPosition := findPosition(name, moveToCategory, channels)
+
+	var channelsToUpdate []discord.GuildChannelPositionUpdate
+
+	channelsToUpdate = append(channelsToUpdate, discord.GuildChannelPositionUpdate{
+		ID:       channelID,
+		ParentID: &moveToCategory,
+		Position: disgojson.NewNullablePtr(channelPosition),
+	})
+
+	channelsToUpdate = append(channelsToUpdate, calculateNewChannelPosition(channelPosition, moveToCategory, channels)...)
+
+	categoryGameID, err = createCategory(categoryGame, categoryGameID, client, event)
+
+	if err != nil {
+		slog.Error("cannot create category game", slog.Any("error", oops.Wrap(err)))
+
+		return
+	}
+
+	categoryArchiveID, err = createCategory(categoryArchive, categoryArchiveID, client, event)
+
+	if err != nil {
+		slog.Error("cannot create category archive", slog.Any("error", oops.Wrap(err)))
+
+		return
+	}
+
+	created, err := createChannel(name, channelID, moveToCategory, client, event)
+
+	if err != nil {
+		slog.Error("cannot create channel", slog.Any("error", oops.Wrap(err)))
+
+		return
+	}
+
+	if created {
+		return
+	}
+
+	if channelCategoryID != moveToCategory {
+		err := client.UpdateChannelPositions(event.GuildID, channelsToUpdate)
+
+		if err != nil {
+			slog.Warn("cannot update channel positions", slog.Any("error", oops.Wrap(err)))
+
+			return
+		}
+	}
+}
+
+func findChannelsID(name string, channels []discord.GuildChannel) (snowflake.ID, snowflake.ID, snowflake.ID, snowflake.ID) {
+	var channelID snowflake.ID
+	var channelCategoryID snowflake.ID
+	var categoryArchiveID snowflake.ID
+	var categoryGameID snowflake.ID
+
+	for _, channel := range channels {
+		if channel.Name() == name {
+			channelID = channel.ID()
+			channelCategoryID = *channel.ParentID()
+		}
+
+		if channel.Type() != discord.ChannelTypeGuildCategory {
+			continue
+		}
+
+		channelName := strings.ToLower(channel.Name())
+		if channelName == categoryArchive {
+			categoryArchiveID = channel.ID()
+		}
+
+		if channelName == categoryGame {
+			categoryGameID = channel.ID()
+		}
+
+		if channelID > 0 && categoryArchiveID > 0 && categoryGameID > 0 {
+			break
+		}
+	}
+
+	return channelID, channelCategoryID, categoryGameID, categoryArchiveID
+}
+
+func findPosition(name string, category snowflake.ID, channels []discord.GuildChannel) int {
+	position := 0
+	for _, channel := range channels {
+		if channel.ParentID() != nil && *channel.ParentID() == category && channel.Name() < name {
+			position = channel.Position() + 1
+		}
+	}
+
+	return position
+}
+
+func calculateNewChannelPosition(
+	shiftPosition int,
+	category snowflake.ID,
+	channels []discord.GuildChannel,
+) []discord.GuildChannelPositionUpdate {
+	if shiftPosition == 0 {
+		return []discord.GuildChannelPositionUpdate{}
+	}
+
+	var channelsToUpdate []discord.GuildChannelPositionUpdate
+
+	for _, channel := range channels {
+		if channel.ParentID() == nil {
+			continue
+		}
+
+		if *channel.ParentID() != category {
+			continue
+		}
+
+		if channel.Position() >= shiftPosition {
+			channelsToUpdate = append(channelsToUpdate, discord.GuildChannelPositionUpdate{
+				ID:       channel.ID(),
+				Position: disgojson.NewNullablePtr(channel.Position() + 1),
+			})
+		}
+	}
+
+	return channelsToUpdate
+}
+
+func createCategory(
+	categoryName string,
+	category snowflake.ID,
+	client rest.Rest,
+	event *events.PresenceUpdate,
+) (snowflake.ID, error) {
+	if category != 0 {
+		return category, nil
+	}
+
+	channel, err := client.CreateGuildChannel(event.GuildID, discord.GuildCategoryChannelCreate{
+		Name: categoryName,
+	})
+
+	if err != nil {
+		return 0, oops.Wrapf(err, "cannot create category")
+	}
+
+	return channel.ID(), nil
+}
+
+func createChannel(
+	channelName string,
+	channel snowflake.ID,
+	category snowflake.ID,
+	client rest.Rest,
+	event *events.PresenceUpdate,
+) (bool, error) {
+	if channel != 0 {
+		return false, nil
+	}
+
+	if category == 0 {
+		return false, nil
+	}
+
+	_, err := client.CreateGuildChannel(event.GuildID, discord.GuildTextChannelCreate{
+		Name:     channelName,
+		ParentID: category,
+	})
+
+	if err != nil {
+		return false, oops.Wrapf(err, "cannot create channel")
+	}
+
+	return true, nil
 }
