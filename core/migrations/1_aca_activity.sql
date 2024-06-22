@@ -5,7 +5,7 @@ create table aca_activity
     guild_id      integer           not null,
     user_id       integer           not null,
     activity_name varchar(256),
-    started_at    int               not null,
+    started_at    integer           not null,
     duration      integer default 0 not null
 );
 
