@@ -46,19 +46,6 @@ func (r *Repository) CloseActivityStatement(ctx context.Context) (*sql.Stmt, err
 	return stmt, nil
 }
 
-func (r *Repository) ExecCloseActivityStatement(
-	ctx context.Context,
-	stmt *sql.Stmt,
-	eventActivity CurrentActivity,
-) error {
-	_, err := stmt.ExecContext(ctx, eventActivity.UUID)
-	if err != nil {
-		return oops.Wrapf(err, "failed to execute statement")
-	}
-
-	return nil
-}
-
 func (r *Repository) GetCurrentActivitiesUUID(
 	ctx context.Context,
 	event *events.PresenceUpdate,

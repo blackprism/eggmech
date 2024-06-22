@@ -15,7 +15,7 @@ func main() {
 	ctx := context.Background()
 
 	if err := agent.Listen(agent.Options{}); err != nil {
-		slog.Error("error creating agent", slog.Any("error", err))
+		slog.Error("error creating gops agent", slog.Any("error", err))
 	}
 
 	core.SetupLogger()
