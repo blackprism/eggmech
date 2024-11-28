@@ -26,6 +26,8 @@ import (
 const Name = "autoChannelActivity"
 const categoryGame = "game"
 const categoryArchive = "game archive"
+const minimumPlayer = 2
+const mimimumHoursByWeek = 4 * 60
 
 type TraceableActivity struct {
 	UUID      Uuidv7
@@ -87,8 +89,8 @@ func Run(ctx context.Context, getenv func(string) string) error {
 				return oops.Wrapf(err, "failed to get current activities")
 			}
 
-			processActivitiesToClose(ctx, client, closeActivityStatement, event, currentActivities)
-			processActivitiesToCreate(ctx, client, insertStatement, event, currentActivities)
+			processActivitiesToClose(ctx, client, closeActivityStatement, event, currentActivities, repo)
+			processActivitiesToCreate(ctx, client, insertStatement, event, currentActivities, repo)
 
 			return nil
 		}
@@ -109,6 +111,7 @@ func processActivitiesToClose(
 	closeActivityStatement *sql.Stmt,
 	event *events.PresenceUpdate,
 	currentActivities []CurrentActivity,
+	repo Repository,
 ) {
 	for _, currentActivity := range currentActivities {
 		foundInActivity := false
@@ -122,17 +125,10 @@ func processActivitiesToClose(
 		}
 
 		if !foundInActivity {
-			processActivity(
-				ctx,
-				client,
-				closeActivityStatement,
-				event,
-				TraceableActivity{
-					UUID:      currentActivity.UUID,
-					Name:      currentActivity.Name,
-					CreatedAt: time.Now(),
-				},
-			)
+			_, err := closeActivityStatement.ExecContext(ctx, currentActivity.UUID)
+			if err != nil {
+				slog.Error("failed to close activity", slog.Any("error", oops.Wrap(err)))
+			}
 		}
 	}
 }
@@ -143,6 +139,7 @@ func processActivitiesToCreate(
 	insertStatement *sql.Stmt,
 	event *events.PresenceUpdate,
 	currentActivities []CurrentActivity,
+	repo Repository,
 ) {
 	for _, eventActivity := range event.Activities {
 		foundInDatabase := false
@@ -166,6 +163,7 @@ func processActivitiesToCreate(
 					Name:      eventActivity.Name,
 					CreatedAt: eventActivity.CreatedAt,
 				},
+				repo,
 			)
 		}
 	}
@@ -177,6 +175,7 @@ func processActivity(
 	statement *sql.Stmt,
 	event *events.PresenceUpdate,
 	activity TraceableActivity,
+	repo Repository,
 ) {
 	uuidv7, err := uuid.NewV7()
 	if err != nil {
@@ -185,27 +184,29 @@ func processActivity(
 		return
 	}
 
-	if activity.UUID == "" {
-		_, err = statement.ExecContext(
-			ctx,
-			uuidv7,
-			event.GuildID,
-			event.PresenceUser.ID,
-			activity.Name,
-			activity.CreatedAt,
-		)
-		if err != nil {
-			slog.Error("failed to insert activity", slog.Any("error", oops.Wrap(err)))
+	_, err = statement.ExecContext(
+		ctx,
+		uuidv7,
+		event.GuildID,
+		event.PresenceUser.ID,
+		activity.Name,
+		activity.CreatedAt,
+	)
+	if err != nil {
+		slog.Error("failed to insert activity", slog.Any("error", oops.Wrap(err)))
 
-			return
-		}
+		return
 	}
 
-	if activity.UUID != "" {
-		_, err = statement.ExecContext(ctx, activity.UUID)
-		if err != nil {
-			slog.Error("failed to close activity", slog.Any("error", oops.Wrap(err)))
-		}
+	gameUsage, err := repo.GameUsage(ctx, activity.Name)
+	if err != nil {
+		slog.Error("failed to get game usage", slog.Any("error", oops.Wrap(err)))
+
+		return
+	}
+
+	if gameUsage.Users < minimumPlayer || gameUsage.Duration < mimimumHoursByWeek {
+		return
 	}
 
 	channels, err := client.GetGuildChannels(event.GuildID)
@@ -265,7 +266,7 @@ func processActivity(
 	}
 
 	if channelCategoryID != moveToCategory {
-		err := client.UpdateChannelPositions(event.GuildID, channelsToUpdate)
+		err = client.UpdateChannelPositions(event.GuildID, channelsToUpdate)
 
 		if err != nil {
 			slog.Warn("cannot update channel positions", slog.Any("error", oops.Wrap(err)))

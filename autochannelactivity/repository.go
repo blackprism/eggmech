@@ -19,6 +19,11 @@ type CurrentActivity struct {
 	Name string
 }
 
+type GameUsage struct {
+	Duration uint
+	Users    uint
+}
+
 type Repository struct {
 	DB *sql.DB
 }
@@ -89,4 +94,37 @@ func (r *Repository) GetCurrentActivitiesUUID(
 	}
 
 	return currentActivities, nil
+}
+
+func (r *Repository) GameUsage(ctx context.Context, activityName string) (GameUsage, error) {
+	stmt, err := r.DB.PrepareContext(ctx, `SELECT 
+		SUM(duration) duration, count(distinct user_id) users
+		FROM aca_activity
+		WHERE aca_activity.started_at > CURRENT_DATE-7*86400
+			AND activity_name = ?
+		GROUP BY aca_activity.activity_name`)
+	if err != nil {
+		return GameUsage{}, oops.Wrapf(err, "failed to prepare statement")
+	}
+
+	rows, err := stmt.QueryContext(ctx, activityName)
+	if err != nil {
+		return GameUsage{}, oops.Wrapf(err, "failed to execute query")
+	}
+	defer rows.Close()
+
+	rows.Next()
+	var duration uint
+	var users uint
+
+	err = rows.Scan(&duration, &users)
+
+	if err != nil {
+		return GameUsage{}, oops.Wrapf(err, "failed to scan row")
+	}
+
+	return GameUsage{
+		Duration: duration,
+		Users:    users,
+	}, nil
 }
