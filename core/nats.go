@@ -95,17 +95,8 @@ func ConsumeActivity(
 	subjects []string,
 	handler func(msg jetstream.Msg) error,
 ) error {
-	return consume(ctx, natsConn, consumerName, "ACTIVITY", subjects, handler)
-}
+	streamName := "ACTIVITY"
 
-func consume(
-	ctx context.Context,
-	natsConn *nats.Conn,
-	consumerName string,
-	streamName string,
-	subjects []string,
-	handler func(msg jetstream.Msg) error,
-) error {
 	slog.Info(fmt.Sprintf("%s is now running. Press CTRL-C to exit.", consumerName))
 
 	defer Close(natsConn)

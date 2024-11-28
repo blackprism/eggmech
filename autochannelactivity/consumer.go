@@ -8,7 +8,6 @@ import (
 	"os"
 	"os/signal"
 	"strings"
-	"time"
 
 	"github.com/disgoorg/disgo/discord"
 	"github.com/disgoorg/disgo/events"
@@ -26,13 +25,12 @@ import (
 const Name = "autoChannelActivity"
 const categoryGame = "game"
 const categoryArchive = "game archive"
-const minimumPlayer = 2
-const mimimumHoursByWeek = 4 * 60
+const minimumPlayer = 1
+const mimimumHoursByWeek = 1 * 60
 
 type TraceableActivity struct {
-	UUID      Uuidv7
-	Name      string
-	CreatedAt time.Time
+	UUID Uuidv7
+	Name string
 }
 
 func Run(ctx context.Context, getenv func(string) string) error {
@@ -51,49 +49,10 @@ func Run(ctx context.Context, getenv func(string) string) error {
 	}
 	defer db.Close()
 
-	repo := Repository{DB: db}
-
-	insertStatement, err := repo.InsertStatement(ctx)
-	if err != nil {
-		slog.Error("failed to get insert statement", slog.Any("error", err))
-	}
-	defer insertStatement.Close()
-
-	closeActivityStatement, err := repo.CloseActivityStatement(ctx)
-	if err != nil {
-		slog.Error("failed to get close activity statement", slog.Any("error", err))
-	}
-	defer closeActivityStatement.Close()
-
 	client := rest.New(rest.NewClient(getenv("DISCORD_TOKEN")))
 
 	if err != nil {
 		return oops.Wrapf(err, "error connecting to disgo")
-	}
-
-	handler := func(client rest.Rest, insertStatement *sql.Stmt, closeActivityStatement *sql.Stmt) func(msg jetstream.Msg) error {
-		return func(msg jetstream.Msg) error {
-
-			var event *events.PresenceUpdate
-			err = json.Unmarshal(msg.Data(), &event)
-
-			if err != nil {
-				return oops.Wrapf(err, "failed to unmarshal presence update event")
-			}
-
-			slog.Info("received from durable consumer", slog.Any("event", event), slog.Any("subject", msg.Subject()))
-
-			currentActivities, err := repo.GetCurrentActivitiesUUID(ctx, event)
-
-			if err != nil {
-				return oops.Wrapf(err, "failed to get current activities")
-			}
-
-			processActivitiesToClose(ctx, client, closeActivityStatement, event, currentActivities, repo)
-			processActivitiesToCreate(ctx, client, insertStatement, event, currentActivities, repo)
-
-			return nil
-		}
 	}
 
 	return core.ConsumeActivity(
@@ -101,8 +60,45 @@ func Run(ctx context.Context, getenv func(string) string) error {
 		natsConn,
 		Name,
 		[]string{"activity.gaming"},
-		handler(client, insertStatement, closeActivityStatement),
+		handler(ctx, db, client),
 	)
+}
+
+func handler(ctx context.Context, db *sql.DB, client rest.Rest) func(msg jetstream.Msg) error {
+	repo := Repository{DB: db}
+
+	insertStatement, err := repo.InsertStatement(ctx)
+	if err != nil {
+		slog.Error("failed to get insert statement", slog.Any("error", err))
+	}
+
+	closeActivityStatement, err := repo.CloseActivityStatement(ctx)
+	if err != nil {
+		slog.Error("failed to get close activity statement", slog.Any("error", err))
+	}
+
+	return func(msg jetstream.Msg) error {
+
+		var event *events.PresenceUpdate
+		errUnmarshal := json.Unmarshal(msg.Data(), &event)
+
+		if errUnmarshal != nil {
+			return oops.Wrapf(errUnmarshal, "failed to unmarshal presence update event")
+		}
+
+		slog.Info("received from durable consumer", slog.Any("event", event), slog.Any("subject", msg.Subject()))
+
+		currentActivities, errRetrievingActivities := repo.GetCurrentActivitiesUUID(ctx, event)
+
+		if errRetrievingActivities != nil {
+			return oops.Wrapf(errRetrievingActivities, "failed to get current activities")
+		}
+
+		processActivitiesToClose(ctx, client, closeActivityStatement, event, currentActivities, repo)
+		processActivitiesToCreate(ctx, client, insertStatement, event, currentActivities, repo)
+
+		return nil
+	}
 }
 
 func processActivitiesToClose(
@@ -129,6 +125,17 @@ func processActivitiesToClose(
 			if err != nil {
 				slog.Error("failed to close activity", slog.Any("error", oops.Wrap(err)))
 			}
+
+			processActivity(
+				ctx,
+				client,
+				event,
+				TraceableActivity{
+					UUID: currentActivity.UUID,
+					Name: currentActivity.Name,
+				},
+				repo,
+			)
 		}
 	}
 }
@@ -153,15 +160,34 @@ func processActivitiesToCreate(
 		}
 
 		if !foundInDatabase {
+			uuidv7, err := uuid.NewV7()
+			if err != nil {
+				slog.Error("failed to generate uuid", slog.Any("error", oops.Wrap(err)))
+
+				return
+			}
+
+			_, err = insertStatement.ExecContext(
+				ctx,
+				uuidv7,
+				event.GuildID,
+				event.PresenceUser.ID,
+				eventActivity.Name,
+				eventActivity.CreatedAt,
+			)
+			if err != nil {
+				slog.Error("failed to insert activity", slog.Any("error", oops.Wrap(err)))
+
+				return
+			}
+
 			processActivity(
 				ctx,
 				client,
-				insertStatement,
 				event,
 				TraceableActivity{
-					UUID:      "",
-					Name:      eventActivity.Name,
-					CreatedAt: eventActivity.CreatedAt,
+					UUID: "",
+					Name: eventActivity.Name,
 				},
 				repo,
 			)
@@ -172,40 +198,14 @@ func processActivitiesToCreate(
 func processActivity(
 	ctx context.Context,
 	client rest.Rest,
-	statement *sql.Stmt,
 	event *events.PresenceUpdate,
 	activity TraceableActivity,
 	repo Repository,
 ) {
-	uuidv7, err := uuid.NewV7()
-	if err != nil {
-		slog.Error("failed to generate uuid", slog.Any("error", oops.Wrap(err)))
-
-		return
-	}
-
-	_, err = statement.ExecContext(
-		ctx,
-		uuidv7,
-		event.GuildID,
-		event.PresenceUser.ID,
-		activity.Name,
-		activity.CreatedAt,
-	)
-	if err != nil {
-		slog.Error("failed to insert activity", slog.Any("error", oops.Wrap(err)))
-
-		return
-	}
-
-	gameUsage, err := repo.GameUsage(ctx, activity.Name)
+	hasEnoughActivityUsage, err := repo.HasEnoughActivityUsage(ctx, activity.Name)
 	if err != nil {
 		slog.Error("failed to get game usage", slog.Any("error", oops.Wrap(err)))
 
-		return
-	}
-
-	if gameUsage.Users < minimumPlayer || gameUsage.Duration < mimimumHoursByWeek {
 		return
 	}
 
@@ -217,25 +217,7 @@ func processActivity(
 	}
 
 	name := slug.Make(activity.Name)
-	channelID, channelCategoryID, categoryGameID, categoryArchiveID := findChannelsID(name, channels)
-
-	moveToCategory := categoryGameID
-
-	if activity.UUID != "" {
-		moveToCategory = categoryArchiveID
-	}
-
-	channelPosition := findPosition(name, moveToCategory, channels)
-
-	var channelsToUpdate []discord.GuildChannelPositionUpdate
-
-	channelsToUpdate = append(channelsToUpdate, discord.GuildChannelPositionUpdate{
-		ID:       channelID,
-		ParentID: &moveToCategory,
-		Position: disgojson.NewNullablePtr(channelPosition),
-	})
-
-	channelsToUpdate = append(channelsToUpdate, calculateNewChannelPosition(channelPosition, moveToCategory, channels)...)
+	channelID, categoryGameID, categoryArchiveID := findChannelsID(name, channels)
 
 	categoryGameID, err = createCategory(categoryGame, categoryGameID, client, event)
 
@@ -253,39 +235,50 @@ func processActivity(
 		return
 	}
 
-	created, err := createChannel(name, channelID, moveToCategory, client, event)
+	moveToCategory := categoryGameID
 
-	if err != nil {
-		slog.Error("cannot create channel", slog.Any("error", oops.Wrap(err)))
-
-		return
+	if !hasEnoughActivityUsage {
+		moveToCategory = categoryArchiveID
 	}
 
-	if created {
-		return
-	}
-
-	if channelCategoryID != moveToCategory {
-		err = client.UpdateChannelPositions(event.GuildID, channelsToUpdate)
+	channelPosition := findPosition(name, moveToCategory, channels)
+	if activity.UUID == "" {
+		channelID, err = createChannel(name, channelID, channelPosition, moveToCategory, client, event)
 
 		if err != nil {
-			slog.Warn("cannot update channel positions", slog.Any("error", oops.Wrap(err)))
+			slog.Error("cannot create channel", slog.Any("error", oops.Wrap(err)))
 
 			return
 		}
 	}
+
+	var channelsToUpdate []discord.GuildChannelPositionUpdate
+
+	channelsToUpdate = append(channelsToUpdate, discord.GuildChannelPositionUpdate{
+		ID:       channelID,
+		ParentID: &moveToCategory,
+		Position: disgojson.NewNullablePtr(channelPosition),
+	})
+
+	channelsToUpdate = append(channelsToUpdate, calculateNewChannelPosition(channelPosition, moveToCategory, channels)...)
+
+	err = client.UpdateChannelPositions(event.GuildID, channelsToUpdate)
+
+	if err != nil {
+		slog.Warn("cannot update channel positions", slog.Any("error", oops.Wrap(err)))
+
+		return
+	}
 }
 
-func findChannelsID(name string, channels []discord.GuildChannel) (snowflake.ID, snowflake.ID, snowflake.ID, snowflake.ID) {
+func findChannelsID(name string, channels []discord.GuildChannel) (snowflake.ID, snowflake.ID, snowflake.ID) {
 	var channelID snowflake.ID
-	var channelCategoryID snowflake.ID
 	var categoryArchiveID snowflake.ID
 	var categoryGameID snowflake.ID
 
 	for _, channel := range channels {
 		if channel.Name() == name {
 			channelID = channel.ID()
-			channelCategoryID = *channel.ParentID()
 		}
 
 		if channel.Type() != discord.ChannelTypeGuildCategory {
@@ -306,7 +299,7 @@ func findChannelsID(name string, channels []discord.GuildChannel) (snowflake.ID,
 		}
 	}
 
-	return channelID, channelCategoryID, categoryGameID, categoryArchiveID
+	return channelID, categoryGameID, categoryArchiveID
 }
 
 func findPosition(name string, category snowflake.ID, channels []discord.GuildChannel) int {
@@ -375,26 +368,28 @@ func createCategory(
 func createChannel(
 	channelName string,
 	channel snowflake.ID,
+	channelPosition int,
 	category snowflake.ID,
 	client rest.Rest,
 	event *events.PresenceUpdate,
-) (bool, error) {
+) (snowflake.ID, error) {
 	if channel != 0 {
-		return false, nil
+		return channel, nil
 	}
 
 	if category == 0 {
-		return false, nil
+		return channel, nil
 	}
 
-	_, err := client.CreateGuildChannel(event.GuildID, discord.GuildTextChannelCreate{
+	guildChannel, err := client.CreateGuildChannel(event.GuildID, discord.GuildTextChannelCreate{
 		Name:     channelName,
 		ParentID: category,
+		Position: channelPosition,
 	})
 
 	if err != nil {
-		return false, oops.Wrapf(err, "cannot create channel")
+		return 0, oops.Wrapf(err, "cannot create channel")
 	}
 
-	return true, nil
+	return guildChannel.ID(), nil
 }

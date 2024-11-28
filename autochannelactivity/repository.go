@@ -19,11 +19,6 @@ type CurrentActivity struct {
 	Name string
 }
 
-type GameUsage struct {
-	Duration uint
-	Users    uint
-}
-
 type Repository struct {
 	DB *sql.DB
 }
@@ -96,35 +91,36 @@ func (r *Repository) GetCurrentActivitiesUUID(
 	return currentActivities, nil
 }
 
-func (r *Repository) GameUsage(ctx context.Context, activityName string) (GameUsage, error) {
-	stmt, err := r.DB.PrepareContext(ctx, `SELECT 
-		SUM(duration) duration, count(distinct user_id) users
-		FROM aca_activity
-		WHERE aca_activity.started_at > CURRENT_DATE-7*86400
-			AND activity_name = ?
-		GROUP BY aca_activity.activity_name`)
+func (r *Repository) HasEnoughActivityUsage(ctx context.Context, activityName string) (bool, error) {
+	stmt, err := r.DB.PrepareContext(ctx, `WITH activities AS (
+		SELECT SUM(duration) AS duration,
+			   count(distinct user_id) AS players,
+			   aas.minimum_hours * 3600 AS minimum_seconds,
+			   aas.minimum_players
+		FROM aca_activity aa
+		INNER JOIN aca_activity_settings aas ON (aas.guild_id = aa.guild_id AND aas.activity_name = aa.activity_name)
+		WHERE aa.started_at > date('now','-' || aas.day_interval || ' day')
+		  AND aa.activity_name = ?
+		GROUP BY aa.activity_name)
+		SELECT 1 FROM activities WHERE players >= minimum_players AND duration >= minimum_seconds`)
 	if err != nil {
-		return GameUsage{}, oops.Wrapf(err, "failed to prepare statement")
+		return false, oops.Wrapf(err, "failed to prepare statement")
 	}
 
 	rows, err := stmt.QueryContext(ctx, activityName)
 	if err != nil {
-		return GameUsage{}, oops.Wrapf(err, "failed to execute query")
+		return false, oops.Wrapf(err, "failed to execute query")
 	}
 	defer rows.Close()
 
 	rows.Next()
-	var duration uint
-	var users uint
+	var hasEnough uint
 
-	err = rows.Scan(&duration, &users)
+	err = rows.Scan(&hasEnough)
 
 	if err != nil {
-		return GameUsage{}, oops.Wrapf(err, "failed to scan row")
+		return false, nil
 	}
 
-	return GameUsage{
-		Duration: duration,
-		Users:    users,
-	}, nil
+	return true, nil
 }
