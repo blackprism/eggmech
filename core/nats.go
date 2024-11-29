@@ -2,7 +2,6 @@ package core
 
 import (
 	"context"
-	"fmt"
 	"log/slog"
 	"time"
 
@@ -97,7 +96,7 @@ func ConsumeActivity(
 ) error {
 	streamName := "ACTIVITY"
 
-	slog.Info(fmt.Sprintf("%s is now running. Press CTRL-C to exit.", consumerName))
+	slog.Info("%s is now running. Press CTRL-C to exit.", consumerName)
 
 	defer Close(natsConn)
 
@@ -147,7 +146,7 @@ func handleMessage(
 	sleepBetweenConsumeFailure time.Duration,
 	msg *jetstream.Msg,
 ) {
-	if *msg == nil {
+	if msg == nil {
 		return
 	}
 
