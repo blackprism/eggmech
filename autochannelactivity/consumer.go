@@ -39,37 +39,45 @@ func Run(ctx context.Context, getenv func(string) string) error {
 	db, err := sql.Open("sqlite3", "deployments/data/database.sqlite3")
 	if err != nil {
 		slog.Error("failed to connect to database", slog.Any("error", err))
+
+		return err
 	}
 	defer db.Close()
 
-	client := rest.New(rest.NewClient(getenv("DISCORD_TOKEN")))
+	repo := Repository{DB: db}
 
+	insertStatement, err := repo.InsertStatement(ctx)
 	if err != nil {
-		return oops.Wrapf(err, "error connecting to disgo")
+		slog.Error("failed to get insert statement", slog.Any("error", err))
+
+		return err
 	}
+
+	closeActivityStatement, err := repo.CloseActivityStatement(ctx)
+	if err != nil {
+		slog.Error("failed to get close activity statement", slog.Any("error", err))
+
+		return err
+	}
+
+	client := rest.New(rest.NewClient(getenv("DISCORD_TOKEN")))
 
 	return core.ConsumeActivity(
 		ctx,
 		natsConn,
 		Name,
 		[]string{"activity.gaming"},
-		handler(ctx, db, client),
+		handler(ctx, repo, insertStatement, closeActivityStatement, client),
 	)
 }
 
-func handler(ctx context.Context, db *sql.DB, client rest.Rest) func(msg jetstream.Msg) error {
-	repo := Repository{DB: db}
-
-	insertStatement, err := repo.InsertStatement(ctx)
-	if err != nil {
-		slog.Error("failed to get insert statement", slog.Any("error", err))
-	}
-
-	closeActivityStatement, err := repo.CloseActivityStatement(ctx)
-	if err != nil {
-		slog.Error("failed to get close activity statement", slog.Any("error", err))
-	}
-
+func handler(
+	ctx context.Context,
+	repo Repository,
+	insertStatement *sql.Stmt,
+	closeActivityStatement *sql.Stmt,
+	client rest.Rest,
+) func(msg jetstream.Msg) error {
 	return func(msg jetstream.Msg) error {
 		var event *events.PresenceUpdate
 		errUnmarshal := json.Unmarshal(msg.Data(), &event)

@@ -118,14 +118,18 @@ func (r *Repository) HasEnoughActivityUsage(ctx context.Context, activityName st
 		return false, oops.Wrapf(rows.Err(), "failed to fetch rows")
 	}
 
-	rows.Next()
+	hasRow := rows.Next()
+
+	if !hasRow {
+		return false, nil
+	}
 
 	var hasEnough uint
 
 	errScan := rows.Scan(&hasEnough)
 
 	if errScan != nil {
-		return false, nil
+		return false, oops.Wrapf(rows.Err(), "failed to scan row")
 	}
 
 	return true, nil
