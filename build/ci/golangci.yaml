@@ -28,7 +28,7 @@ linters:
     - errname
     - errorlint
     - exhaustive
-    - exportloopref
+    - copyloopvar
     - forbidigo # doublon avec goprintffuncname
     - forcetypeassert
     - funlen
@@ -99,3 +99,5 @@ linters-settings:
     ignore-names:
       - err
       - db
+  funlen:
+    lines: 80

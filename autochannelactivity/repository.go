@@ -92,7 +92,7 @@ func (r *Repository) GetCurrentActivitiesUUID(
 }
 
 func (r *Repository) HasEnoughActivityUsage(ctx context.Context, activityName string) (bool, error) {
-	stmt, err := r.DB.PrepareContext(ctx, `WITH activities AS (
+	stmt, errPrepare := r.DB.PrepareContext(ctx, `WITH activities AS (
 		SELECT SUM(duration) AS duration,
 			   count(distinct user_id) AS players,
 			   aas.minimum_hours * 3600 AS minimum_seconds,
@@ -103,22 +103,28 @@ func (r *Repository) HasEnoughActivityUsage(ctx context.Context, activityName st
 		  AND aa.activity_name = ?
 		GROUP BY aa.activity_name)
 		SELECT 1 FROM activities WHERE players >= minimum_players AND duration >= minimum_seconds`)
-	if err != nil {
-		return false, oops.Wrapf(err, "failed to prepare statement")
+	if errPrepare != nil {
+		return false, oops.Wrapf(errPrepare, "failed to prepare statement")
 	}
+	defer stmt.Close()
 
-	rows, err := stmt.QueryContext(ctx, activityName)
-	if err != nil {
-		return false, oops.Wrapf(err, "failed to execute query")
+	rows, errQuery := stmt.QueryContext(ctx, activityName)
+	if errQuery != nil {
+		return false, oops.Wrapf(errQuery, "failed to execute query")
 	}
 	defer rows.Close()
 
+	if rows.Err() != nil {
+		return false, oops.Wrapf(rows.Err(), "failed to fetch rows")
+	}
+
 	rows.Next()
+
 	var hasEnough uint
 
-	err = rows.Scan(&hasEnough)
+	errScan := rows.Scan(&hasEnough)
 
-	if err != nil {
+	if errScan != nil {
 		return false, nil
 	}
 

@@ -4,6 +4,7 @@ go 1.22.2
 
 require (
 	github.com/disgoorg/disgo v0.18.7
+	github.com/disgoorg/json v1.1.0
 	github.com/disgoorg/snowflake/v2 v2.0.1
 	github.com/gofrs/uuid/v5 v5.2.0
 	github.com/google/gops v0.3.28
@@ -15,7 +16,6 @@ require (
 )
 
 require (
-	github.com/disgoorg/json v1.1.0 // indirect
 	github.com/gorilla/websocket v1.5.1 // indirect
 	github.com/gosimple/unidecode v1.0.1 // indirect
 	github.com/klauspost/compress v1.17.2 // indirect

@@ -25,13 +25,6 @@ import (
 const Name = "autoChannelActivity"
 const categoryGame = "game"
 const categoryArchive = "game archive"
-const minimumPlayer = 1
-const mimimumHoursByWeek = 1 * 60
-
-type TraceableActivity struct {
-	UUID Uuidv7
-	Name string
-}
 
 func Run(ctx context.Context, getenv func(string) string) error {
 	ctx, cancel := signal.NotifyContext(ctx, os.Interrupt)
@@ -78,7 +71,6 @@ func handler(ctx context.Context, db *sql.DB, client rest.Rest) func(msg jetstre
 	}
 
 	return func(msg jetstream.Msg) error {
-
 		var event *events.PresenceUpdate
 		errUnmarshal := json.Unmarshal(msg.Data(), &event)
 
@@ -130,10 +122,7 @@ func processActivitiesToClose(
 				ctx,
 				client,
 				event,
-				TraceableActivity{
-					UUID: currentActivity.UUID,
-					Name: currentActivity.Name,
-				},
+				currentActivity,
 				repo,
 			)
 		}
@@ -185,7 +174,7 @@ func processActivitiesToCreate(
 				ctx,
 				client,
 				event,
-				TraceableActivity{
+				CurrentActivity{
 					UUID: "",
 					Name: eventActivity.Name,
 				},
@@ -199,7 +188,7 @@ func processActivity(
 	ctx context.Context,
 	client rest.Rest,
 	event *events.PresenceUpdate,
-	activity TraceableActivity,
+	activity CurrentActivity,
 	repo Repository,
 ) {
 	hasEnoughActivityUsage, err := repo.HasEnoughActivityUsage(ctx, activity.Name)
@@ -273,7 +262,9 @@ func processActivity(
 
 func findChannelsID(name string, channels []discord.GuildChannel) (snowflake.ID, snowflake.ID, snowflake.ID) {
 	var channelID snowflake.ID
+
 	var categoryArchiveID snowflake.ID
+
 	var categoryGameID snowflake.ID
 
 	for _, channel := range channels {
@@ -304,6 +295,7 @@ func findChannelsID(name string, channels []discord.GuildChannel) (snowflake.ID,
 
 func findPosition(name string, category snowflake.ID, channels []discord.GuildChannel) int {
 	position := 0
+
 	for _, channel := range channels {
 		if channel.ParentID() != nil && *channel.ParentID() == category && channel.Name() < name {
 			position = channel.Position() + 1
