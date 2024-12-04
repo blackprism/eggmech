@@ -135,7 +135,7 @@ func ConsumeActivity(
 		case <-ctx.Done():
 			return nil
 		case msg := <-msgs.Messages():
-			handleMessage(consumerName, handler, sleepBetweenConsumeFailure, &msg)
+			handleMessage(consumerName, handler, sleepBetweenConsumeFailure, msg)
 		}
 	}
 }
@@ -144,13 +144,13 @@ func handleMessage(
 	consumerName string,
 	handler func(msg jetstream.Msg) error,
 	sleepBetweenConsumeFailure time.Duration,
-	msg *jetstream.Msg,
+	msg jetstream.Msg,
 ) {
 	if msg == nil {
 		return
 	}
 
-	errHandler := handler(*msg)
+	errHandler := handler(msg)
 
 	if errHandler != nil {
 		slog.Error("error consumer handler", slog.String("consumer", consumerName), slog.Any("error", errHandler))
@@ -159,7 +159,7 @@ func handleMessage(
 		return
 	}
 
-	errAck := (*msg).Ack()
+	errAck := msg.Ack()
 	if errAck != nil {
 		slog.Error("error consumer ack", slog.String("consumer", consumerName), slog.Any("error", errAck))
 	}

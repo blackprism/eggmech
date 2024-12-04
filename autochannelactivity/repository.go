@@ -93,16 +93,23 @@ func (r *Repository) GetCurrentActivitiesUUID(
 
 func (r *Repository) HasEnoughActivityUsage(ctx context.Context, activityName string) (bool, error) {
 	stmt, errPrepare := r.DB.PrepareContext(ctx, `WITH activities AS (
-		SELECT SUM(duration) AS duration,
-			   count(distinct user_id) AS players,
-			   aas.minimum_hours * 3600 AS minimum_seconds,
-			   aas.minimum_players
-		FROM aca_activity aa
-		INNER JOIN aca_activity_settings aas ON (aas.guild_id = aa.guild_id AND aas.activity_name = aa.activity_name)
-		WHERE aa.started_at > date('now','-' || aas.day_interval || ' day')
-		  AND aa.activity_name = ?
-		GROUP BY aa.activity_name)
-		SELECT 1 FROM activities WHERE players >= minimum_players AND duration >= minimum_seconds`)
+	SELECT SUM(duration) AS duration,
+		   count(distinct user_id) AS players,
+		   CASE WHEN aas.uuid IS NOT NULL THEN aas.minimum_hours ELSE aas_default.minimum_hours END * 3600 AS minimum_seconds,
+		   CASE WHEN aas.uuid IS NOT NULL THEN aas.minimum_players ELSE aas_default.minimum_players END AS minimum_players
+	FROM aca_activity aa
+	LEFT JOIN aca_activity_settings AS aas
+		ON (aas.guild_id = aa.guild_id AND aas.activity_name = aa.activity_name)
+	INNER JOIN aca_activity_settings AS aas_default 
+		ON (aas_default.guild_id = aa.guild_id AND aas_default.activity_name IS NULL)
+	WHERE
+		aa.started_at > DATE(
+			'now',
+			'-' || CASE WHEN aas.uuid IS NOT NULL THEN aas.day_interval ELSE aas_default.day_interval END || ' day'
+		)
+	   AND aa.activity_name = ?
+	GROUP BY aa.activity_name)
+	SELECT 1 FROM activities WHERE players >= minimum_players AND duration >= minimum_seconds`)
 	if errPrepare != nil {
 		return false, oops.Wrapf(errPrepare, "failed to prepare statement")
 	}
