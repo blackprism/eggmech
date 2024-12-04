@@ -3,10 +3,7 @@ package autochannelactivity
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"log/slog"
-	"os"
-	"os/signal"
 	"strings"
 
 	"github.com/disgoorg/disgo/discord"
@@ -16,59 +13,42 @@ import (
 	"github.com/disgoorg/snowflake/v2"
 	"github.com/gofrs/uuid/v5"
 	"github.com/gosimple/slug"
-	"github.com/nats-io/nats.go/jetstream"
 	"github.com/samber/oops"
-
-	"eggmech/core"
 )
 
-const Name = "autoChannelActivity"
-const categoryGame = "game"
-const categoryArchive = "game archive"
-
-func Run(ctx context.Context, getenv func(string) string) error {
-	ctx, cancel := signal.NotifyContext(ctx, os.Interrupt)
-	defer cancel()
-
-	natsConn, err := core.Connect(getenv("NATS_URL"), -1)
-
-	if err != nil {
-		return oops.Wrapf(err, "failed to connect to nats")
-	}
-
-	db, err := sql.Open("sqlite3", "deployments/data/database.sqlite3")
-	if err != nil {
-		slog.Error("failed to connect to database", slog.Any("error", err))
-
-		return err
-	}
-	defer db.Close()
-
-	repo := Repository{DB: db}
-
-	insertStatement, err := repo.InsertStatement(ctx)
+func PresenceHandler(
+	ctx context.Context,
+	botID snowflake.ID,
+	client rest.Rest,
+	repo Repository,
+) func(event *events.PresenceUpdate) {
+	insertActivityStatement, err := repo.InsertStatement(ctx)
 	if err != nil {
 		slog.Error("failed to get insert statement", slog.Any("error", err))
 
-		return err
+		return nil
 	}
 
 	closeActivityStatement, err := repo.CloseActivityStatement(ctx)
 	if err != nil {
 		slog.Error("failed to get close activity statement", slog.Any("error", err))
 
-		return err
+		return nil
 	}
 
-	client := rest.New(rest.NewClient(getenv("DISCORD_TOKEN")))
+	return func(event *events.PresenceUpdate) {
+		if botID == event.PresenceUser.ID {
+			return
+		}
 
-	return core.ConsumeActivity(
-		ctx,
-		natsConn,
-		Name,
-		[]string{"activity.gaming"},
-		handler(ctx, repo, insertStatement, closeActivityStatement, client),
-	)
+		errHandler := handler(ctx, repo, insertActivityStatement, closeActivityStatement, client, event)
+
+		if err != nil {
+			slog.Error("failed to run handler", slog.Any("error", errHandler))
+
+			return
+		}
+	}
 }
 
 func handler(
@@ -77,28 +57,18 @@ func handler(
 	insertStatement *sql.Stmt,
 	closeActivityStatement *sql.Stmt,
 	client rest.Rest,
-) func(msg jetstream.Msg) error {
-	return func(msg jetstream.Msg) error {
-		var event *events.PresenceUpdate
-		errUnmarshal := json.Unmarshal(msg.Data(), &event)
+	event *events.PresenceUpdate,
+) error {
+	currentActivities, errRetrievingActivities := repo.GetCurrentActivitiesUUID(ctx, event)
 
-		if errUnmarshal != nil {
-			return oops.Wrapf(errUnmarshal, "failed to unmarshal presence update event")
-		}
-
-		slog.Info("received from durable consumer", slog.Any("event", event), slog.Any("subject", msg.Subject()))
-
-		currentActivities, errRetrievingActivities := repo.GetCurrentActivitiesUUID(ctx, event)
-
-		if errRetrievingActivities != nil {
-			return oops.Wrapf(errRetrievingActivities, "failed to get current activities")
-		}
-
-		processActivitiesToClose(ctx, client, closeActivityStatement, event, currentActivities, repo)
-		processActivitiesToCreate(ctx, client, insertStatement, event, currentActivities, repo)
-
-		return nil
+	if errRetrievingActivities != nil {
+		return oops.Wrapf(errRetrievingActivities, "failed to get current activities")
 	}
+
+	processActivitiesToClose(ctx, client, closeActivityStatement, event, currentActivities, repo)
+	processActivitiesToCreate(ctx, client, insertStatement, event, currentActivities, repo)
+
+	return nil
 }
 
 func processActivitiesToClose(
@@ -113,6 +83,10 @@ func processActivitiesToClose(
 		foundInActivity := false
 
 		for _, activity := range event.Activities {
+			if activity.Type != discord.ActivityTypeGame {
+				continue
+			}
+
 			if activity.Name == currentActivity.Name {
 				foundInActivity = true
 
@@ -146,6 +120,10 @@ func processActivitiesToCreate(
 	repo Repository,
 ) {
 	for _, eventActivity := range event.Activities {
+		if eventActivity.Type != discord.ActivityTypeGame {
+			continue
+		}
+
 		foundInDatabase := false
 
 		for _, activity := range currentActivities {

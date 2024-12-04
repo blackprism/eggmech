@@ -1,4 +1,4 @@
-package core
+package autochannelactivity
 
 import (
 	"log/slog"

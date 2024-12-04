@@ -9,7 +9,6 @@ import (
 	_ "github.com/joho/godotenv/autoload"
 
 	"eggmech/autochannelactivity"
-	"eggmech/core"
 )
 
 func main() {
@@ -19,7 +18,7 @@ func main() {
 		slog.Error("error creating gops agent", slog.Any("error", err))
 	}
 
-	core.SetupLogger()
+	autochannelactivity.SetupLogger()
 
 	err := autochannelactivity.Run(ctx, os.Getenv)
 
