@@ -11,6 +11,11 @@ jobs:
     env:
       ANTHROPIC_BASE_URL: "https://api.z.ai/api/anthropic"
 
+    permissions:
+      id-token: write
+      contents: read
+      pull-requests: write 
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
