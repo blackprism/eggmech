@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+
+	"dagger/eggmech/internal/dagger"
 )
 
 type Eggmech struct{}
@@ -9,17 +11,17 @@ type Eggmech struct{}
 func (e *Eggmech) Linter(
 	ctx context.Context,
 	// configuration file of golangci-lint
-	config *File,
+	config *dagger.File,
 
 	// application directory source
-	applicationDir *Directory,
+	applicationDir *dagger.Directory,
 
 	directory string,
 
 	// fix files when its possible
 	// +optional
 	fix bool,
-) *Container {
+) *dagger.Container {
 	entrypoint := []string{"golangci-lint", "run", "-c", "/.golangci.yaml", "./..."}
 
 	if fix {
@@ -27,25 +29,25 @@ func (e *Eggmech) Linter(
 	}
 
 	return dag.Container().
-		From("golangci/golangci-lint:v1.58.1").
+		From("golangci/golangci-lint:v2.5.0").
 		WithMountedDirectory("/app", applicationDir).
 		WithFile("/.golangci.yaml", config).
 		WithWorkdir("/app/" + directory).
 		WithExec(entrypoint)
 }
 
-func (e *Eggmech) Vet(ctx context.Context, applicationDir *Directory) (string, error) {
+func (e *Eggmech) Vet(ctx context.Context, applicationDir *dagger.Directory) (string, error) {
 	return dag.Container().
-		From("golang:1.22").
+		From("golang:1.25").
 		WithMountedDirectory("/app", applicationDir).
 		WithWorkdir("/app").
 		WithEntrypoint([]string{"go", "vet", "./..."}).
 		Stdout(ctx)
 }
 
-func (e *Eggmech) Staticcheck(ctx context.Context, applicationDir *Directory) (string, error) {
+func (e *Eggmech) Staticcheck(ctx context.Context, applicationDir *dagger.Directory) (string, error) {
 	return dag.Container().
-		From("golang:1.22").
+		From("golang:1.25").
 		WithMountedDirectory("/app", applicationDir).
 		WithWorkdir("/app").
 		WithExec([]string{"go", "install", "honnef.co/go/tools/cmd/staticcheck@latest"}).

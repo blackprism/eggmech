@@ -4,12 +4,9 @@ tasks:
   nats:
     cmds:
       - nats-server -D -js -m 8222 -sd deployments/data/nats
-  linter-core:
-    cmds:
-      - dagger call linter --config build/ci/golangci.yaml --application-dir . --directory core
-  linter-core-fix:
-    cmds:
-      - dagger call linter --config build/ci/golangci.yaml --application-dir core/ --fix directory --path /app/ export --path core
   linter-autochannelactivity:
     cmds:
       - dagger call linter --config build/ci/golangci.yaml --application-dir . --directory autochannelactivity
+  linter-autochannelactivity-fix:
+    cmds:
+      - dagger call linter --config build/ci/golangci.yaml --application-dir . --directory autochannelactivity/ --fix directory --path /app/autochannelactivity export --path autochannelactivity

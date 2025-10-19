@@ -1,8 +1,6 @@
-go 1.22.2
+go 1.23.3
 
 use (
-	./build/ci/dagger
-	./core
-	./test
 	./autochannelactivity
+	./build/ci/dagger
 )

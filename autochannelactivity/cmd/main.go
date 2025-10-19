@@ -5,19 +5,27 @@ import (
 	"log/slog"
 	"os"
 
-	"eggmech/autochannelactivity/internal"
-	"eggmech/core"
+	"github.com/google/gops/agent"
+	_ "github.com/joho/godotenv/autoload"
+
+	"eggmech/autochannelactivity"
 )
 
 func main() {
 	ctx := context.Background()
 
-	core.SetupLogger()
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
+		AddSource: true,
+	}))
 
-	err := internal.Run(ctx, os.Getenv)
+	if err := agent.Listen(agent.Options{}); err != nil {
+		logger.ErrorContext(ctx, "error creating gops agent", slog.Any("error", err))
+	}
+
+	err := autochannelactivity.Run(ctx, os.Getenv, logger)
 
 	if err != nil {
-		slog.Error("failed to start server", slog.Any("error", err))
+		logger.ErrorContext(ctx, "failed to start server", slog.Any("error", err))
 		os.Exit(1)
 	}
 }

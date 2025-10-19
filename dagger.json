@@ -1,6 +1,6 @@
 {
   "name": "eggmech",
+  "engineVersion": "v0.14.0",
   "sdk": "go",
-  "source": "build/ci/dagger",
-  "engineVersion": "v0.11.4"
+  "source": "build/ci/dagger"
 }
