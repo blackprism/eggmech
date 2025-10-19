@@ -1,4 +1,4 @@
-package autochannelactivity
+package activity
 
 import (
 	"context"
@@ -11,10 +11,12 @@ import (
 	"github.com/disgoorg/disgo/rest"
 	disgojson "github.com/disgoorg/json"
 	"github.com/disgoorg/snowflake/v2"
-	"github.com/gofrs/uuid/v5"
 	"github.com/gosimple/slug"
 	"github.com/samber/oops"
 )
+
+const categoryGame = "game"
+const categoryArchive = "game archive"
 
 func PresenceHandler(
 	ctx context.Context,
@@ -135,21 +137,8 @@ func processActivitiesToCreate(
 		}
 
 		if !foundInDatabase {
-			uuidv7, err := uuid.NewV7()
-			if err != nil {
-				slog.Error("failed to generate uuid", slog.Any("error", oops.Wrap(err)))
+			err := repo.InsertActivity(ctx, event, eventActivity)
 
-				return
-			}
-
-			_, err = insertStatement.ExecContext(
-				ctx,
-				uuidv7,
-				event.GuildID,
-				event.PresenceUser.ID,
-				eventActivity.Name,
-				eventActivity.CreatedAt,
-			)
 			if err != nil {
 				slog.Error("failed to insert activity", slog.Any("error", oops.Wrap(err)))
 
@@ -218,7 +207,7 @@ func processActivity(
 
 	channelPosition := findPosition(name, moveToCategory, channels)
 	if activity.UUID == "" {
-		channelID, err = createChannel(name, channelID, channelPosition, moveToCategory, client, event)
+		channelID, err = createChannel(ctx, repo, name, channelID, channelPosition, moveToCategory, client, event)
 
 		if err != nil {
 			slog.Error("cannot create channel", slog.Any("error", oops.Wrap(err)))
@@ -344,6 +333,8 @@ func createCategory(
 }
 
 func createChannel(
+	ctx context.Context,
+	repo Repository,
 	channelName string,
 	channel snowflake.ID,
 	channelPosition int,
@@ -367,6 +358,12 @@ func createChannel(
 
 	if err != nil {
 		return 0, oops.Wrapf(err, "cannot create channel")
+	}
+
+	errCreateChannel := repo.CreateChannel(ctx, event.GuildID, guildChannel.ID(), channelName)
+
+	if errCreateChannel != nil {
+		return 0, oops.Wrapf(errCreateChannel, "cannot create channel in db")
 	}
 
 	return guildChannel.ID(), nil

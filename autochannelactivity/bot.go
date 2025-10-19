@@ -14,11 +14,11 @@ import (
 	"github.com/disgoorg/disgo/gateway"
 	"github.com/disgoorg/disgo/rest"
 	"github.com/samber/oops"
+
+	"eggmech/autochannelactivity/activity"
 )
 
 const Name = "autoChannelActivity"
-const categoryGame = "game"
-const categoryArchive = "game archive"
 
 //go:embed migrations/*.sql
 var migrationsEmbed embed.FS
@@ -48,7 +48,7 @@ func Run(ctx context.Context, getenv func(string) string) error {
 		return oops.Wrapf(err, "error connecting to disgo")
 	}
 
-	db, err := sql.Open("sqlite3", "deployments/data/database.sqlite3")
+	db, err := sql.Open("sqlite3", "deployments/data/database.sqlite3?_foreign_keys=true")
 	if err != nil {
 		slog.Error("failed to connect to database", slog.Any("error", err))
 
@@ -56,11 +56,10 @@ func Run(ctx context.Context, getenv func(string) string) error {
 	}
 	defer db.Close()
 
-	repo := Repository{DB: db}
 	client := rest.New(rest.NewClient(getenv("DISCORD_TOKEN")))
 
 	discord.AddEventListeners(&events.ListenerAdapter{
-		OnPresenceUpdate: PresenceHandler(ctx, discord.ID(), client, repo),
+		OnPresenceUpdate: activity.PresenceHandler(ctx, discord.ID(), client, activity.BuildRepository(db)),
 	})
 
 	if err = discord.OpenGateway(ctx); err != nil {
