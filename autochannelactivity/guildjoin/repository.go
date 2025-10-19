@@ -7,7 +7,7 @@ import (
 	"github.com/disgoorg/disgo/events"
 	"github.com/disgoorg/snowflake/v2"
 	"github.com/gofrs/uuid/v5"
-	_ "github.com/mattn/go-sqlite3"
+	_ "github.com/mattn/go-sqlite3" // SQLite driver
 	"github.com/samber/oops"
 )
 
@@ -43,6 +43,10 @@ func (r *Repository) SetDefaultSettings(
 	defer stmt.Close()
 
 	uuidv7, err := uuid.NewV7()
+
+	if err != nil {
+		return oops.Wrapf(err, "failed to create uuidv7")
+	}
 
 	_, err = stmt.ExecContext(ctx, uuidv7, event.GuildID, MinimumPlayers, MinimumHours, DayInterval)
 	if err != nil {

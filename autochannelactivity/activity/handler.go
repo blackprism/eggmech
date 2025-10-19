@@ -23,17 +23,18 @@ func PresenceHandler(
 	botID snowflake.ID,
 	client rest.Rest,
 	repo Repository,
+	logger *slog.Logger,
 ) func(event *events.PresenceUpdate) {
 	insertActivityStatement, err := repo.InsertStatement(ctx)
 	if err != nil {
-		slog.Error("failed to get insert statement", slog.Any("error", err))
+		logger.ErrorContext(ctx, "failed to get insert statement", slog.Any("error", err))
 
 		return nil
 	}
 
 	closeActivityStatement, err := repo.CloseActivityStatement(ctx)
 	if err != nil {
-		slog.Error("failed to get close activity statement", slog.Any("error", err))
+		logger.ErrorContext(ctx, "failed to get close activity statement", slog.Any("error", err))
 
 		return nil
 	}
@@ -43,10 +44,10 @@ func PresenceHandler(
 			return
 		}
 
-		errHandler := handler(ctx, repo, insertActivityStatement, closeActivityStatement, client, event)
+		errHandler := handler(ctx, repo, insertActivityStatement, closeActivityStatement, client, event, logger)
 
 		if err != nil {
-			slog.Error("failed to run handler", slog.Any("error", errHandler))
+			logger.ErrorContext(ctx, "failed to run handler", slog.Any("error", errHandler))
 
 			return
 		}
@@ -60,6 +61,7 @@ func handler(
 	closeActivityStatement *sql.Stmt,
 	client rest.Rest,
 	event *events.PresenceUpdate,
+	logger *slog.Logger,
 ) error {
 	currentActivities, errRetrievingActivities := repo.GetCurrentActivitiesUUID(ctx, event)
 
@@ -67,8 +69,8 @@ func handler(
 		return oops.Wrapf(errRetrievingActivities, "failed to get current activities")
 	}
 
-	processActivitiesToClose(ctx, client, closeActivityStatement, event, currentActivities, repo)
-	processActivitiesToCreate(ctx, client, insertStatement, event, currentActivities, repo)
+	processActivitiesToClose(ctx, client, closeActivityStatement, event, currentActivities, repo, logger)
+	processActivitiesToCreate(ctx, client, insertStatement, event, currentActivities, repo, logger)
 
 	return nil
 }
@@ -80,6 +82,7 @@ func processActivitiesToClose(
 	event *events.PresenceUpdate,
 	currentActivities []CurrentActivity,
 	repo Repository,
+	logger *slog.Logger,
 ) {
 	for _, currentActivity := range currentActivities {
 		foundInActivity := false
@@ -99,7 +102,7 @@ func processActivitiesToClose(
 		if !foundInActivity {
 			_, err := closeActivityStatement.ExecContext(ctx, currentActivity.UUID)
 			if err != nil {
-				slog.Error("failed to close activity", slog.Any("error", oops.Wrap(err)))
+				logger.ErrorContext(ctx, "failed to close activity", slog.Any("error", oops.Wrap(err)))
 			}
 
 			processActivity(
@@ -108,6 +111,7 @@ func processActivitiesToClose(
 				event,
 				currentActivity,
 				repo,
+				logger,
 			)
 		}
 	}
@@ -120,7 +124,10 @@ func processActivitiesToCreate(
 	event *events.PresenceUpdate,
 	currentActivities []CurrentActivity,
 	repo Repository,
+	logger *slog.Logger,
 ) {
+	_ = insertStatement
+
 	for _, eventActivity := range event.Activities {
 		if eventActivity.Type != discord.ActivityTypeGame {
 			continue
@@ -140,7 +147,7 @@ func processActivitiesToCreate(
 			err := repo.InsertActivity(ctx, event, eventActivity)
 
 			if err != nil {
-				slog.Error("failed to insert activity", slog.Any("error", oops.Wrap(err)))
+				logger.ErrorContext(ctx, "failed to insert activity", slog.Any("error", oops.Wrap(err)))
 
 				return
 			}
@@ -154,6 +161,7 @@ func processActivitiesToCreate(
 					Name: eventActivity.Name,
 				},
 				repo,
+				logger,
 			)
 		}
 	}
@@ -165,17 +173,18 @@ func processActivity(
 	event *events.PresenceUpdate,
 	activity CurrentActivity,
 	repo Repository,
+	logger *slog.Logger,
 ) {
 	hasEnoughActivityUsage, err := repo.HasEnoughActivityUsage(ctx, activity.Name)
 	if err != nil {
-		slog.Error("failed to get game usage", slog.Any("error", oops.Wrap(err)))
+		logger.ErrorContext(ctx, "failed to get game usage", slog.Any("error", oops.Wrap(err)))
 
 		return
 	}
 
 	channels, err := client.GetGuildChannels(event.GuildID)
 	if err != nil {
-		slog.Error("failed to get channels", slog.Any("error", oops.Wrap(err)))
+		logger.ErrorContext(ctx, "failed to get channels", slog.Any("error", oops.Wrap(err)))
 
 		return
 	}
@@ -186,7 +195,7 @@ func processActivity(
 	categoryGameID, err = createCategory(categoryGame, categoryGameID, client, event)
 
 	if err != nil {
-		slog.Error("cannot create category game", slog.Any("error", oops.Wrap(err)))
+		logger.ErrorContext(ctx, "cannot create category game", slog.Any("error", oops.Wrap(err)))
 
 		return
 	}
@@ -194,7 +203,7 @@ func processActivity(
 	categoryArchiveID, err = createCategory(categoryArchive, categoryArchiveID, client, event)
 
 	if err != nil {
-		slog.Error("cannot create category archive", slog.Any("error", oops.Wrap(err)))
+		logger.ErrorContext(ctx, "cannot create category archive", slog.Any("error", oops.Wrap(err)))
 
 		return
 	}
@@ -210,7 +219,7 @@ func processActivity(
 		channelID, err = createChannel(ctx, repo, name, channelID, channelPosition, moveToCategory, client, event)
 
 		if err != nil {
-			slog.Error("cannot create channel", slog.Any("error", oops.Wrap(err)))
+			logger.ErrorContext(ctx, "cannot create channel", slog.Any("error", oops.Wrap(err)))
 
 			return
 		}
@@ -224,12 +233,15 @@ func processActivity(
 		Position: disgojson.NewNullablePtr(channelPosition),
 	})
 
-	channelsToUpdate = append(channelsToUpdate, calculateNewChannelPosition(channelPosition, moveToCategory, channels)...)
+	channelsToUpdate = append(
+		channelsToUpdate,
+		calculateNewChannelPosition(channelPosition, moveToCategory, channels)...,
+	)
 
 	err = client.UpdateChannelPositions(event.GuildID, channelsToUpdate)
 
 	if err != nil {
-		slog.Warn("cannot update channel positions", slog.Any("error", oops.Wrap(err)))
+		logger.WarnContext(ctx, "cannot update channel positions", slog.Any("error", oops.Wrap(err)))
 
 		return
 	}

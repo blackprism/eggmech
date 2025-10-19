@@ -9,7 +9,7 @@ import (
 	"github.com/disgoorg/disgo/events"
 	"github.com/disgoorg/snowflake/v2"
 	"github.com/gofrs/uuid/v5"
-	_ "github.com/mattn/go-sqlite3"
+	_ "github.com/mattn/go-sqlite3" // SQLite driver
 	"github.com/samber/oops"
 )
 
@@ -28,32 +28,39 @@ type CurrentActivity struct {
 
 type Repository struct {
 	db         *sql.DB
-	statements map[string]*sql.Stmt
+	Statements map[string]*sql.Stmt
 }
 
 func BuildRepository(db *sql.DB) Repository {
 	return Repository{
 		db:         db,
-		statements: make(map[string]*sql.Stmt),
+		Statements: make(map[string]*sql.Stmt),
+	}
+}
+
+func (r *Repository) Close() {
+	for _, stmt := range r.Statements {
+		_ = stmt.Close()
 	}
 }
 
 func (r *Repository) getStatement(ctx context.Context, name string, query string) (*sql.Stmt, error) {
-	if r.statements[name] == nil {
+	if r.Statements[name] == nil {
 		stmt, err := r.db.PrepareContext(ctx, query)
 		if err != nil {
 			return nil, oops.Wrapf(err, "failed to prepare statement")
 		}
 
-		r.statements[name] = stmt
+		r.Statements[name] = stmt
 	}
 
-	return r.statements[name], nil
+	return r.Statements[name], nil
 }
 
 func (r *Repository) InsertStatement(ctx context.Context) (*sql.Stmt, error) {
 	stmt, err := r.db.PrepareContext(ctx, `INSERT INTO aca_activity
 			(uuid, guild_id, user_id, activity_name, started_at) VALUES (?, ?, ?, ?, ?)`)
+
 	if err != nil {
 		return nil, oops.Wrapf(err, "failed to prepare statement")
 	}
@@ -74,7 +81,12 @@ func (r *Repository) CloseActivityStatement(ctx context.Context) (*sql.Stmt, err
 	return stmt, nil
 }
 
-func (r *Repository) InsertActivity(ctx context.Context, event *events.PresenceUpdate, activity discord.Activity) error {
+func (r *Repository) InsertActivity(
+	ctx context.Context,
+	event *events.PresenceUpdate,
+	activity discord.Activity,
+) error {
+	//nolint:sqlclosecheck // statement pool
 	stmt, errStmt := r.getStatement(ctx, "insert_activity", `INSERT INTO aca_activity
 			(uuid, guild_id, user_id, activity_name, started_at) VALUES (?, ?, ?, ?, ?)`)
 
@@ -82,9 +94,9 @@ func (r *Repository) InsertActivity(ctx context.Context, event *events.PresenceU
 		return oops.Wrapf(errStmt, "can't get statement for insert activity")
 	}
 
-	uuidv7, errUuid := uuid.NewV7()
-	if errUuid != nil {
-		return oops.Wrapf(errStmt, "failed to generate uuid for insert activity")
+	uuidv7, errUUID := uuid.NewV7()
+	if errUUID != nil {
+		return oops.Wrapf(errUUID, "failed to generate uuid for insert activity")
 	}
 
 	_, errExec := stmt.ExecContext(
@@ -103,7 +115,13 @@ func (r *Repository) InsertActivity(ctx context.Context, event *events.PresenceU
 	return nil
 }
 
-func (r *Repository) CreateChannel(ctx context.Context, guildID snowflake.ID, channelID snowflake.ID, channel string) error {
+func (r *Repository) CreateChannel(
+	ctx context.Context,
+	guildID snowflake.ID,
+	channelID snowflake.ID,
+	channel string,
+) error {
+	//nolint:sqlclosecheck // statement pool
 	stmtGet, errStmtGet := r.getStatement(
 		ctx,
 		"get_activity_settings",
@@ -123,11 +141,12 @@ func (r *Repository) CreateChannel(ctx context.Context, guildID snowflake.ID, ch
 	var uuidv7ForSettings Uuidv7
 	errScan := row.Scan(&uuidv7ForSettings)
 
-	if errScan != nil && !errors.As(errScan, &sql.ErrNoRows) {
+	if errScan != nil && !errors.Is(errScan, sql.ErrNoRows) {
 		return oops.Wrapf(errScan, "can't get uuid for channel")
 	}
 
 	if uuidv7ForSettings == "" {
+		//nolint:sqlclosecheck // statement pool
 		stmt, errStmt := r.getStatement(
 			ctx,
 			"insert_activity_settings",
@@ -140,9 +159,9 @@ func (r *Repository) CreateChannel(ctx context.Context, guildID snowflake.ID, ch
 			return oops.Wrapf(errStmt, "can't get statement for insert activity settings")
 		}
 
-		uuidv7, errUuid := uuid.NewV7()
-		if errUuid != nil {
-			return oops.Wrapf(errStmt, "failed to generate uuid for insert activity settings")
+		uuidv7, errUUID := uuid.NewV7()
+		if errUUID != nil {
+			return oops.Wrapf(errUUID, "failed to generate uuid for insert activity settings")
 		}
 		uuidv7ForSettings = Uuidv7(uuidv7.String())
 
@@ -161,6 +180,7 @@ func (r *Repository) CreateChannel(ctx context.Context, guildID snowflake.ID, ch
 		}
 	}
 
+	//nolint:sqlclosecheck // statement pool
 	stmt, errStmt := r.getStatement(
 		ctx,
 		"insert_activity_channel",
@@ -173,9 +193,9 @@ func (r *Repository) CreateChannel(ctx context.Context, guildID snowflake.ID, ch
 		return oops.Wrapf(errStmt, "can't get statement for insert activity channel")
 	}
 
-	uuidv7ForChannel, errUuid := uuid.NewV7()
-	if errUuid != nil {
-		return oops.Wrapf(errStmt, "failed to generate uuid for insert activity channel")
+	uuidv7ForChannel, errUUID := uuid.NewV7()
+	if errUUID != nil {
+		return oops.Wrapf(errUUID, "failed to generate uuid for insert activity channel")
 	}
 
 	_, errExec := stmt.ExecContext(

@@ -1,16 +1,17 @@
 package autochannelactivity
 
 import (
+	"context"
 	"embed"
 	"log/slog"
 	"net/url"
 
 	"github.com/amacneil/dbmate/v2/pkg/dbmate"
-	_ "github.com/amacneil/dbmate/v2/pkg/driver/sqlite"
+	_ "github.com/amacneil/dbmate/v2/pkg/driver/sqlite" // SQLite driver
 	"github.com/samber/oops"
 )
 
-func migration(migrationsEmbed embed.FS) error {
+func migration(ctx context.Context, migrationsEmbed embed.FS, logger *slog.Logger) error {
 	databaseURL, _ := url.Parse("sqlite:deployments/data/database.sqlite3")
 	db := dbmate.New(databaseURL)
 	db.MigrationsDir = []string{"migrations"}
@@ -29,7 +30,7 @@ func migration(migrationsEmbed embed.FS) error {
 	}
 
 	for _, m := range migrations {
-		slog.Info("Migration", slog.String("version", m.Version), slog.String("file", m.FilePath))
+		logger.InfoContext(ctx, "Migration", slog.String("version", m.Version), slog.String("file", m.FilePath))
 	}
 
 	err = db.CreateAndMigrate()

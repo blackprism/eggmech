@@ -23,11 +23,11 @@ const Name = "autoChannelActivity"
 //go:embed migrations/*.sql
 var migrationsEmbed embed.FS
 
-func Run(ctx context.Context, getenv func(string) string) error {
+func Run(ctx context.Context, getenv func(string) string, logger *slog.Logger) error {
 	ctx, cancel := signal.NotifyContext(ctx, os.Interrupt)
 	defer cancel()
 
-	err := migration(migrationsEmbed)
+	err := migration(ctx, migrationsEmbed, logger)
 
 	if err != nil {
 		return oops.Wrapf(err, "failed to run migration")
@@ -50,7 +50,7 @@ func Run(ctx context.Context, getenv func(string) string) error {
 
 	db, err := sql.Open("sqlite3", "deployments/data/database.sqlite3?_foreign_keys=true")
 	if err != nil {
-		slog.Error("failed to connect to database", slog.Any("error", err))
+		logger.ErrorContext(ctx, "failed to connect to database", slog.Any("error", err))
 
 		return err
 	}
@@ -58,15 +58,24 @@ func Run(ctx context.Context, getenv func(string) string) error {
 
 	client := rest.New(rest.NewClient(getenv("DISCORD_TOKEN")))
 
+	activityRepository := activity.BuildRepository(db)
+	defer activityRepository.Close()
+
 	discord.AddEventListeners(&events.ListenerAdapter{
-		OnPresenceUpdate: activity.PresenceHandler(ctx, discord.ID(), client, activity.BuildRepository(db)),
+		OnPresenceUpdate: activity.PresenceHandler(
+			ctx,
+			discord.ID(),
+			client,
+			activityRepository,
+			logger,
+		),
 	})
 
 	if err = discord.OpenGateway(ctx); err != nil {
 		return oops.Wrapf(err, "error connecting to Discord")
 	}
 
-	slog.Info("Bot module autochannelactivity is now running. Press CTRL-C to exit.")
+	logger.InfoContext(ctx, "Bot module autochannelactivity is now running. Press CTRL-C to exit.")
 	<-ctx.Done()
 
 	return nil

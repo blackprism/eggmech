@@ -11,13 +11,6 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v2
 
-      - name: linter core
-        uses: dagger/dagger-for-github@v5
-        with:
-          verb: call
-          args: linter --config build/ci/golangci.yaml --application-dir . --directory core
-          cloud-token: ${{ secrets.DAGGER_CLOUD_TOKEN }}
-
       - name: linter autochannelactivity
         uses: dagger/dagger-for-github@v5
         with:

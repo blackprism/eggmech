@@ -8,16 +8,16 @@ import (
 	"github.com/samber/oops"
 )
 
-func GuildJoinHandler(
+func Handler(
 	ctx context.Context,
 	repo Repository,
+	logger *slog.Logger,
 ) func(event *events.GuildJoin) {
 	return func(event *events.GuildJoin) {
-
 		errHandler := handler(ctx, repo, event)
 
 		if errHandler != nil {
-			slog.Error("failed to run handler", slog.Any("error", errHandler))
+			logger.ErrorContext(ctx, "failed to run handler", slog.Any("error", errHandler))
 
 			return
 		}

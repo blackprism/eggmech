@@ -14,16 +14,18 @@ import (
 func main() {
 	ctx := context.Background()
 
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
+		AddSource: true,
+	}))
+
 	if err := agent.Listen(agent.Options{}); err != nil {
-		slog.Error("error creating gops agent", slog.Any("error", err))
+		logger.ErrorContext(ctx, "error creating gops agent", slog.Any("error", err))
 	}
 
-	autochannelactivity.SetupLogger()
-
-	err := autochannelactivity.Run(ctx, os.Getenv)
+	err := autochannelactivity.Run(ctx, os.Getenv, logger)
 
 	if err != nil {
-		slog.Error("failed to start server", slog.Any("error", err))
+		logger.ErrorContext(ctx, "failed to start server", slog.Any("error", err))
 		os.Exit(1)
 	}
 }
