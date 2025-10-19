@@ -46,6 +46,7 @@ func (r *Repository) Close() {
 
 func (r *Repository) getStatement(ctx context.Context, name string, query string) (*sql.Stmt, error) {
 	if r.Statements[name] == nil {
+		//nolint:sqlclosecheck // statement pool, closed on repository close
 		stmt, err := r.db.PrepareContext(ctx, query)
 		if err != nil {
 			return nil, oops.Wrapf(err, "failed to prepare statement")
